@@ -3,6 +3,7 @@ from datetime import datetime
 import streamlit as st
 
 from classe_maternelle import determine_entree_accueil
+from doc_mdp import render_doc_mdp
 
 
 # ============================================================
@@ -18,6 +19,12 @@ st.set_page_config(
 
 # ============================================================
 # CHAMP DATE PERSONNALISÉ
+#
+# Permet :
+# - de saisir uniquement les chiffres ;
+# - d'ajouter automatiquement les "/" ;
+# - de lancer le calcul avec le bouton "Calculer" ;
+# - de lancer le calcul avec la touche Enter.
 # ============================================================
 
 DATE_INPUT_HTML = """
@@ -112,11 +119,13 @@ DATE_INPUT_CSS = """
 
 
 DATE_INPUT_JS = """
-export default function({
-    parentElement,
-    data,
-    setTriggerValue
-}) {
+export default function(component) {
+
+    const {
+        parentElement,
+        data,
+        setTriggerValue
+    } = component;
 
     const input = parentElement.querySelector(
         "#date-naissance-input"
@@ -130,9 +139,10 @@ export default function({
         return;
     }
 
-    // --------------------------------------------------------
+
+    // ========================================================
     // INITIALISATION DU CHAMP
-    // --------------------------------------------------------
+    // ========================================================
 
     if (!input.dataset.initialized) {
 
@@ -142,27 +152,44 @@ export default function({
     }
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // FORMATAGE AUTOMATIQUE JJ/MM/AAAA
-    // --------------------------------------------------------
+    // ========================================================
 
     function formatDate(value) {
 
+        // On garde uniquement les chiffres
         const digits = value
             .replace(/\\D/g, "")
             .slice(0, 8);
+
+
+        // Exemple :
+        // 2
+        // 27
 
         if (digits.length <= 2) {
             return digits;
         }
 
+
+        // Exemple :
+        // 270  -> 27/0
+        // 2708 -> 27/08
+
         if (digits.length <= 4) {
+
             return (
                 digits.slice(0, 2)
                 + "/"
                 + digits.slice(2)
             );
         }
+
+
+        // Exemple :
+        // 27082    -> 27/08/2
+        // 27082024 -> 27/08/2024
 
         return (
             digits.slice(0, 2)
@@ -174,9 +201,9 @@ export default function({
     }
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // FORMATAGE PENDANT LA FRAPPE
-    // --------------------------------------------------------
+    // ========================================================
 
     input.oninput = function() {
 
@@ -186,9 +213,9 @@ export default function({
     };
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // ENVOI DE LA DATE À STREAMLIT
-    // --------------------------------------------------------
+    // ========================================================
 
     function submitDate() {
 
@@ -199,12 +226,20 @@ export default function({
     }
 
 
+    // ========================================================
+    // CLIC SUR LE BOUTON CALCULER
+    // ========================================================
+
     button.onclick = function() {
+
         submitDate();
     };
 
 
-    // Permet aussi d'appuyer sur Entrée
+    // ========================================================
+    // TOUCHE ENTER
+    // ========================================================
+
     input.onkeydown = function(event) {
 
         if (event.key === "Enter") {
@@ -216,9 +251,9 @@ export default function({
     };
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // NETTOYAGE
-    // --------------------------------------------------------
+    // ========================================================
 
     return () => {
 
@@ -229,6 +264,10 @@ export default function({
 }
 """
 
+
+# ============================================================
+# ENREGISTREMENT DU COMPOSANT DATE
+# ============================================================
 
 date_input_component = st.components.v2.component(
     name="date_naissance_masked",
@@ -282,12 +321,7 @@ if outil == "Accueil":
 
 elif outil == "Doc MDP":
 
-    st.title("📁 Doc MDP")
-
-    st.info(
-        "Outil en construction — "
-        "la liste des documents sera ajoutée ici."
-    )
+    render_doc_mdp()
 
 
 # ============================================================
@@ -304,9 +338,10 @@ elif outil == "Classe Maternelle":
         "sa première date possible d'entrée."
     )
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # DERNIÈRE DATE INTRODUITE
-    # --------------------------------------------------------
+    # ========================================================
 
     previous_date = st.session_state.get(
         "last_birthdate",
@@ -314,9 +349,9 @@ elif outil == "Classe Maternelle":
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # CHAMP DATE
-    # --------------------------------------------------------
+    # ========================================================
 
     date_result = date_input_component(
         data={
@@ -328,9 +363,11 @@ elif outil == "Classe Maternelle":
     )
 
 
-    # --------------------------------------------------------
-    # DATE ENVOYÉE AU CLIC SUR CALCULER
-    # --------------------------------------------------------
+    # ========================================================
+    # DATE ENVOYÉE APRÈS :
+    # - clic sur Calculer
+    # - ou pression sur Enter
+    # ========================================================
 
     dob_text = date_result.submitted_date
 
@@ -339,13 +376,19 @@ elif outil == "Classe Maternelle":
 
         dob_text = dob_text.strip()
 
-        # Conserver la dernière date
-        st.session_state["last_birthdate"] = dob_text
+
+        # ====================================================
+        # MÉMORISER LA DERNIÈRE DATE
+        # ====================================================
+
+        st.session_state[
+            "last_birthdate"
+        ] = dob_text
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # CHAMP VIDE
-        # ----------------------------------------------------
+        # ====================================================
 
         if not dob_text:
 
@@ -354,33 +397,36 @@ elif outil == "Classe Maternelle":
             )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # TRAITEMENT
-        # ----------------------------------------------------
+        # ====================================================
 
         else:
 
             try:
 
-                # Conversion en date Python
+                # --------------------------------------------
+                # CONVERSION DU TEXTE EN DATE PYTHON
+                # --------------------------------------------
+
                 dob = datetime.strptime(
                     dob_text,
                     "%d/%m/%Y"
                 ).date()
 
 
-                # ------------------------------------------------
+                # --------------------------------------------
                 # CALCUL
-                # ------------------------------------------------
+                # --------------------------------------------
 
                 result = determine_entree_accueil(
                     dob
                 )
 
 
-                # ------------------------------------------------
-                # CAS NON TRAITABLE
-                # ------------------------------------------------
+                # --------------------------------------------
+                # DATE NON TRAITABLE
+                # --------------------------------------------
 
                 if result is None:
 
@@ -391,18 +437,18 @@ elif outil == "Classe Maternelle":
                     )
 
 
-                # ------------------------------------------------
+                # --------------------------------------------
                 # AFFICHAGE DU RÉSULTAT
-                # ------------------------------------------------
+                # --------------------------------------------
 
                 else:
 
                     st.write("")
 
 
-                    # --------------------------------------------
+                    # ========================================
                     # DATE DE NAISSANCE
-                    # --------------------------------------------
+                    # ========================================
 
                     st.write(
                         f"**Date de naissance :** "
@@ -410,9 +456,12 @@ elif outil == "Classe Maternelle":
                     )
 
 
-                    # --------------------------------------------
+                    # ========================================
                     # DATE DES 2 ANS ET DEMI
-                    # --------------------------------------------
+                    #
+                    # Affichée uniquement si l'enfant
+                    # n'a pas encore atteint 2 ans et demi.
+                    # ========================================
 
                     if result["theoretical"] is not None:
 
@@ -422,9 +471,9 @@ elif outil == "Classe Maternelle":
                         )
 
 
-                    # --------------------------------------------
+                    # ========================================
                     # CLASSE MATERNELLE
-                    # --------------------------------------------
+                    # ========================================
 
                     st.write(
                         f"**Classe maternelle :** "
@@ -432,9 +481,12 @@ elif outil == "Classe Maternelle":
                     )
 
 
-                    # --------------------------------------------
+                    # ========================================
                     # DATE D'ENTRÉE POSSIBLE
-                    # --------------------------------------------
+                    #
+                    # Affichée uniquement si l'enfant
+                    # n'est pas encore scolarisable.
+                    # ========================================
 
                     if result["entry_date"] is not None:
 
@@ -444,9 +496,13 @@ elif outil == "Classe Maternelle":
                         )
 
 
-                    # --------------------------------------------
+                    # ========================================
                     # EXPLICATION
-                    # --------------------------------------------
+                    #
+                    # Affichée lorsque la date des 2 ans
+                    # et demi ne correspond pas à la date
+                    # réelle d'entrée.
+                    # ========================================
 
                     if result["explanation"] is not None:
 
@@ -456,9 +512,9 @@ elif outil == "Classe Maternelle":
                         )
 
 
-            # ----------------------------------------------------
+            # =================================================
             # DATE INCORRECTE
-            # ----------------------------------------------------
+            # =================================================
 
             except ValueError:
 
