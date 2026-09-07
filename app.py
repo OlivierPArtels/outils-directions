@@ -25,8 +25,7 @@ outil = st.sidebar.radio(
         "Accueil",
         "C4 Assistant",
         "Classe Maternelle",
-        "Doc MDP",
-        "Congés MDP"
+        "Doc MDP"
     ]
 )
 
@@ -46,9 +45,8 @@ if outil == "Accueil":
     st.markdown(
         """
         - **C4 Assistant** — calculateur de C4
-        - **Classe Maternelle** — détermine la classe maternelle et la date éventuelle d'entrée
-        - **Doc MDP** — détermine les documents à communiquer
-        - **Congés MDP** — détermine les congés dont peut bénéficier un membre du personnel
+        - **Classe Maternelle** — détermine la classe maternelle de l'enfant
+        - **Doc MDP** — détermine les documents administratifs nécessaires selon la situation du membre du personnel
         """
     )
 
@@ -62,7 +60,7 @@ elif outil == "C4 Assistant":
     st.title("📄 C4 Assistant")
 
     st.info(
-        "Outil en construction — la logique de calcul sera ajoutée ici."
+        "Cet outil est en cours de développement."
     )
 
 
@@ -72,132 +70,92 @@ elif outil == "C4 Assistant":
 
 elif outil == "Classe Maternelle":
 
-    st.title("🧒 Classe Maternelle")
+    st.title("👶 Classe Maternelle")
 
     st.write(
         "Détermine la classe maternelle de l'enfant et, "
         "si nécessaire, sa première date possible d'entrée à l'école."
     )
 
-    # --------------------------------------------------------
-    # DATE DE NAISSANCE
-    # --------------------------------------------------------
-
-    dob = st.date_input(
+    date_naissance = st.date_input(
         "Date de naissance de l'enfant",
         format="DD/MM/YYYY"
     )
 
-    # --------------------------------------------------------
-    # BOUTON DE CALCUL
-    # --------------------------------------------------------
-
     if st.button("Calculer"):
 
-        result = determine_entree_accueil(dob)
+        resultat = determine_entree_accueil(
+            date_naissance
+        )
 
-        # ----------------------------------------------------
-        # CAS NON TRAITABLE
-        # ----------------------------------------------------
+        if resultat is None:
 
-        if result is None:
-
-            st.warning(
-                "La date introduite ne peut pas être traitée "
-                "avec les calendriers scolaires actuellement disponibles."
+            st.error(
+                "Impossible de déterminer la situation pour cette date."
             )
-
-        # ----------------------------------------------------
-        # RÉSULTAT
-        # ----------------------------------------------------
 
         else:
 
-            st.write("")
-
-            # ------------------------------------------------
-            # DATE DE NAISSANCE
-            # ------------------------------------------------
-
-            st.write(
+            st.markdown(
                 f"**Date de naissance :** "
-                f"{result['dob'].strftime('%d/%m/%Y')}"
+                f"{resultat['dob'].strftime('%d/%m/%Y')}"
             )
 
             # ------------------------------------------------
             # DATE DES 2 ANS ET DEMI
-            #
-            # Affichée uniquement si l'enfant
-            # n'a pas encore atteint 2 ans et demi.
             # ------------------------------------------------
 
-            if result["theoretical"] is not None:
+            if resultat["theoretical"] is not None:
 
-                st.write(
-                    f"**L'enfant aura 2 ans et demi le :** "
-                    f"{result['theoretical'].strftime('%d/%m/%Y')}"
+                st.markdown(
+                    f"**Date des 2 ans et demi :** "
+                    f"{resultat['theoretical'].strftime('%d/%m/%Y')}"
                 )
 
             # ------------------------------------------------
             # CLASSE MATERNELLE
             # ------------------------------------------------
 
-            st.write(
+            st.markdown(
                 f"**Classe maternelle :** "
-                f"{result['classe']}"
+                f"{resultat['classe']}"
             )
 
             # ------------------------------------------------
-            # DATE D'ENTRÉE POSSIBLE
-            #
-            # Affichée uniquement si l'enfant
-            # n'est pas encore scolarisable.
+            # PREMIÈRE DATE POSSIBLE D'ENTRÉE
             # ------------------------------------------------
 
-            if result["entry_date"] is not None:
+            if resultat["entry_date"] is not None:
 
-                st.write(
-                    f"**Date d'entrée possible en accueil :** "
-                    f"{result['entry_date'].strftime('%d/%m/%Y')}"
+                st.markdown(
+                    f"**Première date possible d'entrée :** "
+                    f"{resultat['entry_date'].strftime('%d/%m/%Y')}"
                 )
 
             # ------------------------------------------------
             # EXPLICATION
-            #
-            # Affichée uniquement lorsque la date d'entrée
-            # réelle est différente de la date des
-            # 2 ans et demi.
             # ------------------------------------------------
 
-            if result["explanation"] is not None:
+            if resultat["explanation"] is not None:
 
-                st.write(
-                    f"**Explication :** "
-                    f"{result['explanation']}"
+                st.info(
+                    resultat["explanation"]
                 )
 
 
 # ============================================================
-# DOCUMENTS MDP
+# DOC MDP
 # ============================================================
 
 elif outil == "Doc MDP":
 
-    st.title("📁 Doc MDP")
+    st.title("📑 Doc MDP")
 
-    st.info(
-        "Outil en construction — la liste des documents sera ajoutée ici."
+    st.write(
+        "Détermine les documents administratifs à préparer "
+        "et à transmettre selon la situation du membre du personnel."
     )
 
-
-# ============================================================
-# CONGÉS MDP
-# ============================================================
-
-elif outil == "Congés MDP":
-
-    st.title("🗓️ Congés MDP")
-
     st.info(
-        "Outil en construction — l'import Excel et le calcul seront ajoutés ici."
+        "Cet outil est en cours de développement."
     )
