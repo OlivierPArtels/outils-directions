@@ -269,7 +269,7 @@ if outil == "Accueil":
 
     st.markdown(
         """
-        1. **Doc MDP** — détermine les documents à communiquer
+        1. 1. **Doc MDP** — détermine les documents à envoyer au bureau de traitement
         2. **Classe Maternelle** — détermine la classe maternelle et la date éventuelle d'entrée
         3. **C4 Assistant** — calculateur de C4
         """
