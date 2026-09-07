@@ -1,5 +1,7 @@
 import streamlit as st
+
 from classe_maternelle import determine_entree_accueil
+from doc_mdp import render_doc_mdp
 
 
 # ============================================================
@@ -9,7 +11,7 @@ from classe_maternelle import determine_entree_accueil
 st.set_page_config(
     page_title="Outils Directions",
     page_icon="🏫",
-    layout="centered"
+    layout="centered",
 )
 
 
@@ -17,7 +19,9 @@ st.set_page_config(
 # MENU LATÉRAL
 # ============================================================
 
-st.sidebar.title("🏫 Outils Directions")
+st.sidebar.title(
+    "🏫 Outils Directions"
+)
 
 outil = st.sidebar.radio(
     "Choisir un outil",
@@ -25,8 +29,8 @@ outil = st.sidebar.radio(
         "Accueil",
         "C4 Assistant",
         "Classe Maternelle",
-        "Doc MDP"
-    ]
+        "Doc MDP",
+    ],
 )
 
 
@@ -36,7 +40,9 @@ outil = st.sidebar.radio(
 
 if outil == "Accueil":
 
-    st.title("🏫 Outils pour directions d'école")
+    st.title(
+        "🏫 Outils pour directions d'école"
+    )
 
     st.write(
         "Choisissez un outil dans le menu à gauche."
@@ -44,9 +50,9 @@ if outil == "Accueil":
 
     st.markdown(
         """
-        - **C4 Assistant** — calculateur de C4
-        - **Classe Maternelle** — détermine la classe maternelle de l'enfant
-        - **Doc MDP** — détermine les documents administratifs nécessaires selon la situation du membre du personnel
+- **C4 Assistant** — calculateur de C4
+- **Classe Maternelle** — détermine la classe et la première date possible d'entrée lorsque cela est nécessaire
+- **Doc MDP** — détermine les documents à préparer et à transmettre selon la situation du MDP
         """
     )
 
@@ -57,10 +63,12 @@ if outil == "Accueil":
 
 elif outil == "C4 Assistant":
 
-    st.title("📄 C4 Assistant")
+    st.title(
+        "C4 Assistant"
+    )
 
     st.info(
-        "Cet outil est en cours de développement."
+        "Cet outil sera ajouté prochainement."
     )
 
 
@@ -70,19 +78,25 @@ elif outil == "C4 Assistant":
 
 elif outil == "Classe Maternelle":
 
-    st.title("👶 Classe Maternelle")
+    st.title(
+        "Classe Maternelle"
+    )
 
     st.write(
-        "Détermine la classe maternelle de l'enfant et, "
-        "si nécessaire, sa première date possible d'entrée à l'école."
+        (
+            "Indiquez la date de naissance de l'enfant "
+            "pour déterminer sa classe maternelle "
+            "et, si nécessaire, sa première date possible d'entrée."
+        )
     )
 
     date_naissance = st.date_input(
         "Date de naissance de l'enfant",
-        format="DD/MM/YYYY"
+        value=None,
+        format="DD/MM/YYYY",
     )
 
-    if st.button("Calculer"):
+    if date_naissance is not None:
 
         resultat = determine_entree_accueil(
             date_naissance
@@ -91,55 +105,68 @@ elif outil == "Classe Maternelle":
         if resultat is None:
 
             st.error(
-                "Impossible de déterminer la situation pour cette date."
+                (
+                    "La date ne peut pas être traitée "
+                    "avec les années scolaires actuellement configurées."
+                )
             )
 
         else:
 
-            st.markdown(
-                f"**Date de naissance :** "
-                f"{resultat['dob'].strftime('%d/%m/%Y')}"
+            st.subheader(
+                "Résultat"
             )
 
-            # ------------------------------------------------
-            # DATE DES 2 ANS ET DEMI
-            # ------------------------------------------------
-
-            if resultat["theoretical"] is not None:
-
-                st.markdown(
-                    f"**Date des 2 ans et demi :** "
-                    f"{resultat['theoretical'].strftime('%d/%m/%Y')}"
+            st.write(
+                (
+                    "**Date de naissance :** "
+                    f"{resultat['dob'].strftime('%d/%m/%Y')}"
                 )
-
-            # ------------------------------------------------
-            # CLASSE MATERNELLE
-            # ------------------------------------------------
-
-            st.markdown(
-                f"**Classe maternelle :** "
-                f"{resultat['classe']}"
             )
 
-            # ------------------------------------------------
-            # PREMIÈRE DATE POSSIBLE D'ENTRÉE
-            # ------------------------------------------------
+            st.write(
+                (
+                    "**Classe :** "
+                    f"{resultat['classe']}"
+                )
+            )
 
-            if resultat["entry_date"] is not None:
+            if (
+                resultat.get(
+                    "theoretical"
+                )
+                is not None
+            ):
 
-                st.markdown(
-                    f"**Première date possible d'entrée :** "
-                    f"{resultat['entry_date'].strftime('%d/%m/%Y')}"
+                st.write(
+                    (
+                        "**Date des 2 ans et demi :** "
+                        f"{resultat['theoretical'].strftime('%d/%m/%Y')}"
+                    )
                 )
 
-            # ------------------------------------------------
-            # EXPLICATION
-            # ------------------------------------------------
+            if (
+                resultat.get(
+                    "entry_date"
+                )
+                is not None
+            ):
 
-            if resultat["explanation"] is not None:
+                st.write(
+                    (
+                        "**Première date possible d'entrée :** "
+                        f"{resultat['entry_date'].strftime('%d/%m/%Y')}"
+                    )
+                )
+
+            if resultat.get(
+                "explanation"
+            ):
 
                 st.info(
-                    resultat["explanation"]
+                    resultat[
+                        "explanation"
+                    ]
                 )
 
 
@@ -149,13 +176,4 @@ elif outil == "Classe Maternelle":
 
 elif outil == "Doc MDP":
 
-    st.title("📑 Doc MDP")
-
-    st.write(
-        "Détermine les documents administratifs à préparer "
-        "et à transmettre selon la situation du membre du personnel."
-    )
-
-    st.info(
-        "Cet outil est en cours de développement."
-    )
+    render_doc_mdp()
