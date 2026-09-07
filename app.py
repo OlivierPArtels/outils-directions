@@ -34,14 +34,12 @@ elif outil == "Classe Maternelle":
         if result is None:
             st.warning("Cet enfant n'est concerné par une entrée en classe d'accueil pendant aucune des trois années scolaires couvertes (2026-2027, 2027-2028, 2028-2029).")
         else:
-            st.markdown(f"""
-**Date de naissance :** {result['dob'].strftime('%d/%m/%Y')}
-**2 ans et 6 mois :** {result['theoretical'].strftime('%d/%m/%Y')}
-**Année scolaire concernée :** {result['school_year']}
-**Classe :** Accueil
-**Date d'entrée possible :** {result['entry_date'].strftime('%d/%m/%Y')}
-**Explication :** {result['explanation']}
-""")
+            st.write(f"**Date de naissance :** {result['dob'].strftime('%d/%m/%Y')}")
+            st.write(f"**2 ans et 6 mois :** {result['theoretical'].strftime('%d/%m/%Y')}")
+            st.write(f"**Année scolaire concernée :** {result['school_year']}")
+            st.write(f"**Classe :** Accueil")
+            st.write(f"**Date d'entrée possible :** {result['entry_date'].strftime('%d/%m/%Y')}")
+            st.write(f"**Explication :** {result['explanation']}")
 
 elif outil == "Doc MDP":
     st.title("📁 Doc MDP")
