@@ -3,7 +3,26 @@ from dateutil.relativedelta import relativedelta
 
 
 # ============================================================
-# CALENDRIERS SCOLAIRES
+# JOURS DE LA SEMAINE
+# ============================================================
+
+JOURS_FR = [
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+    "dimanche"
+]
+
+
+def jour_semaine(d):
+    return JOURS_FR[d.weekday()]
+
+
+# ============================================================
+# OUTIL DE CRÉATION DES CONGÉS
 # ============================================================
 
 def _h(label, start, end=None):
@@ -13,6 +32,10 @@ def _h(label, start, end=None):
         "end": end or start
     }
 
+
+# ============================================================
+# CALENDRIERS SCOLAIRES
+# ============================================================
 
 SCHOOL_YEARS = [
     {
@@ -170,14 +193,15 @@ SCHOOL_YEARS = [
 
 
 # ============================================================
-# JOURS DE CLASSE
+# GESTION DES JOURS DE CLASSE
 # ============================================================
 
 def _holiday_for(d, holidays):
     """
-    Retourne le congé correspondant à la date d,
-    ou None si la date n'est pas pendant un congé.
+    Retourne le congé dans lequel se trouve la date.
+    Retourne None si la date n'est pas pendant un congé.
     """
+
     for holiday in holidays:
         if holiday["start"] <= d <= holiday["end"]:
             return holiday
@@ -187,15 +211,14 @@ def _holiday_for(d, holidays):
 
 def is_school_day(d, holidays):
     """
-    Retourne True si la date est un jour de classe.
-
-    Samedi = 5
-    Dimanche = 6
+    Vérifie si une date est un jour de classe.
     """
 
+    # Samedi ou dimanche
     if d.weekday() >= 5:
         return False
 
+    # Congé scolaire
     if _holiday_for(d, holidays) is not None:
         return False
 
@@ -204,10 +227,8 @@ def is_school_day(d, holidays):
 
 def next_school_day(d, holidays):
     """
-    Cherche le premier jour de classe à partir de la date donnée.
-
-    Si la date est déjà un jour de classe,
-    elle est conservée.
+    Retourne le premier jour de classe
+    à partir de la date donnée.
     """
 
     current = d
@@ -225,15 +246,15 @@ def next_school_day(d, holidays):
 
 
 # ============================================================
-# ANNÉE SCOLAIRE DE RÉFÉRENCE
+# ANNÉE SCOLAIRE ACTUELLE
 # ============================================================
 
 def get_current_school_year(today):
     """
-    Détermine l'année scolaire à utiliser pour connaître
+    Détermine l'année scolaire à utiliser pour déterminer
     la classe actuelle de l'enfant.
 
-    Pendant les vacances d'été, l'année scolaire suivante
+    Pendant les vacances d'été, la prochaine année scolaire
     est utilisée.
     """
 
@@ -243,8 +264,8 @@ def get_current_school_year(today):
         if school_year["rentree"] <= today <= school_year["fin"]:
             return school_year
 
-    # Vacances d'été :
-    # prendre la prochaine rentrée disponible
+    # Entre deux années scolaires :
+    # utiliser la prochaine rentrée
     for school_year in SCHOOL_YEARS:
 
         if today < school_year["rentree"]:
@@ -254,18 +275,18 @@ def get_current_school_year(today):
 
 
 # ============================================================
-# CLASSE MATERNELLE
+# DÉTERMINATION DE LA CLASSE MATERNELLE
 # ============================================================
 
 def determine_classe(dob, school_year):
     """
-    Détermine la classe de l'enfant selon son année de naissance.
+    Détermine la classe maternelle selon l'année de naissance.
 
-    Exemple pour 2026-2027 :
-    - né en 2024 -> Accueil
-    - né en 2023 -> M1
-    - né en 2022 -> M2
-    - né en 2021 -> M3
+    Pour 2026-2027 :
+    - né en 2024 : Accueil
+    - né en 2023 : M1
+    - né en 2022 : M2
+    - né en 2021 : M3
     """
 
     annee_rentree = school_year["rentree"].year
@@ -287,86 +308,167 @@ def determine_classe(dob, school_year):
 
 
 # ============================================================
-# PREMIÈRE DATE POSSIBLE D'ENTRÉE
+# CALCUL DE LA DATE D'ENTRÉE EN ACCUEIL
 # ============================================================
 
 def calculate_entry_date(theoretical):
     """
     Calcule la première date possible d'entrée à l'école
-    à partir de la date à laquelle l'enfant atteint
-    2 ans et 6 mois.
+    lorsque l'enfant atteint 2 ans et demi.
 
-    La fonction tient compte :
-    - des week-ends ;
-    - des congés scolaires ;
-    - des vacances d'été ;
-    - des dates de rentrée.
+    Retourne :
+    - la date réelle d'entrée ;
+    - une explication uniquement lorsque cette date
+      est différente de la date des 2 ans et demi.
     """
 
     for i, school_year in enumerate(SCHOOL_YEARS):
 
         # ----------------------------------------------------
-        # L'enfant atteint 2 ans et demi avant la rentrée
+        # 2 ans et demi avant la rentrée
         # ----------------------------------------------------
 
-        if theoretical <= school_year["rentree"]:
-            return school_year["rentree"]
+        if theoretical < school_year["rentree"]:
+
+            entry_date = school_year["rentree"]
+
+            explanation = (
+                f"L'enfant atteint 2 ans et demi le "
+                f"{theoretical.strftime('%d/%m/%Y')}, "
+                f"avant la rentrée scolaire. "
+                f"L'entrée est donc possible à partir du "
+                f"{jour_semaine(entry_date)} "
+                f"{entry_date.strftime('%d/%m/%Y')}."
+            )
+
+            return entry_date, explanation
 
         # ----------------------------------------------------
-        # L'enfant atteint 2 ans et demi pendant
-        # l'année scolaire
+        # 2 ans et demi exactement le jour de la rentrée
+        # ----------------------------------------------------
+
+        if theoretical == school_year["rentree"]:
+            return theoretical, None
+
+        # ----------------------------------------------------
+        # 2 ans et demi pendant l'année scolaire
         # ----------------------------------------------------
 
         if school_year["rentree"] < theoretical <= school_year["fin"]:
 
-            return next_school_day(
+            # Jour normal de classe
+            if is_school_day(
+                theoretical,
+                school_year["holidays"]
+            ):
+                return theoretical, None
+
+            # Date d'entrée réelle
+            entry_date = next_school_day(
                 theoretical,
                 school_year["holidays"]
             )
 
+            holiday = _holiday_for(
+                theoretical,
+                school_year["holidays"]
+            )
+
+            # ------------------------------------------------
+            # Congé scolaire
+            # ------------------------------------------------
+
+            if holiday is not None:
+
+                explanation = (
+                    f"Le {theoretical.strftime('%d/%m/%Y')} tombe pendant "
+                    f"{holiday['label']}. "
+                    f"L'entrée est donc reportée au "
+                    f"{jour_semaine(entry_date)} "
+                    f"{entry_date.strftime('%d/%m/%Y')}, "
+                    f"jour de reprise des cours."
+                )
+
+                return entry_date, explanation
+
+            # ------------------------------------------------
+            # Week-end
+            # ------------------------------------------------
+
+            explanation = (
+                f"Le {theoretical.strftime('%d/%m/%Y')} tombe un "
+                f"{jour_semaine(theoretical)}. "
+                f"L'entrée est donc reportée au "
+                f"{jour_semaine(entry_date)} "
+                f"{entry_date.strftime('%d/%m/%Y')}, "
+                f"premier jour de classe suivant."
+            )
+
+            return entry_date, explanation
+
         # ----------------------------------------------------
-        # L'enfant atteint 2 ans et demi pendant
-        # les vacances d'été
+        # 2 ans et demi pendant les vacances d'été
         # ----------------------------------------------------
 
         if i + 1 < len(SCHOOL_YEARS):
 
             next_year = SCHOOL_YEARS[i + 1]
 
-            if school_year["fin"] < theoretical < next_year["rentree"]:
-                return next_year["rentree"]
+            if (
+                school_year["fin"]
+                < theoretical
+                < next_year["rentree"]
+            ):
 
-    # Date située au-delà des calendriers connus
-    return None
+                entry_date = next_year["rentree"]
+
+                explanation = (
+                    f"L'enfant atteint 2 ans et demi le "
+                    f"{theoretical.strftime('%d/%m/%Y')}, "
+                    f"pendant les vacances d'été. "
+                    f"L'entrée est donc possible à la rentrée scolaire, "
+                    f"le {jour_semaine(entry_date)} "
+                    f"{entry_date.strftime('%d/%m/%Y')}."
+                )
+
+                return entry_date, explanation
+
+    return None, None
 
 
 # ============================================================
-# FONCTION PRINCIPALE
+# FONCTION PRINCIPALE UTILISÉE PAR STREAMLIT
 # ============================================================
 
 def determine_entree_accueil(dob):
     """
-    Fonction utilisée par Streamlit.
+    Fonction principale appelée depuis app.py.
 
-    Retourne :
-    - la date de naissance ;
-    - la date des 2 ans et 6 mois uniquement si
-      l'enfant n'a pas encore cet âge ;
-    - la classe maternelle ;
-    - la date d'entrée en accueil uniquement si
-      l'enfant n'est pas encore scolarisable.
+    Structure de la réponse :
+
+    - date de naissance ;
+    - date des 2 ans et demi uniquement si l'enfant
+      n'a pas encore atteint cet âge ;
+    - classe maternelle ;
+    - date d'entrée possible uniquement si l'enfant
+      n'est pas encore scolarisable ;
+    - explication uniquement lorsque la date d'entrée
+      diffère de la date des 2 ans et demi.
     """
 
     today = date.today()
 
-    # Date à laquelle l'enfant atteint 2 ans et 6 mois
+    # --------------------------------------------------------
+    # Date des 2 ans et demi
+    # --------------------------------------------------------
+
     theoretical = dob + relativedelta(
         years=2,
         months=6
     )
 
     # --------------------------------------------------------
-    # Déterminer l'année scolaire de référence
+    # Année scolaire actuelle
     # --------------------------------------------------------
 
     current_school_year = get_current_school_year(today)
@@ -375,7 +477,7 @@ def determine_entree_accueil(dob):
         return None
 
     # --------------------------------------------------------
-    # Déterminer la classe
+    # Classe maternelle
     # --------------------------------------------------------
 
     classe = determine_classe(
@@ -384,10 +486,12 @@ def determine_entree_accueil(dob):
     )
 
     # --------------------------------------------------------
-    # Calculer la première date possible de scolarisation
+    # Première date possible d'entrée
     # --------------------------------------------------------
 
-    first_entry_date = calculate_entry_date(theoretical)
+    first_entry_date, explanation = calculate_entry_date(
+        theoretical
+    )
 
     # --------------------------------------------------------
     # L'enfant a-t-il déjà 2 ans et demi ?
@@ -396,11 +500,7 @@ def determine_entree_accueil(dob):
     has_not_reached_age = today < theoretical
 
     # --------------------------------------------------------
-    # L'enfant est-il déjà scolarisable ?
-    #
-    # Important :
-    # un enfant peut déjà avoir 2 ans et demi mais être
-    # encore pendant un week-end ou un congé scolaire.
+    # L'enfant est-il actuellement scolarisable ?
     # --------------------------------------------------------
 
     not_yet_scholarisable = (
@@ -409,14 +509,27 @@ def determine_entree_accueil(dob):
     )
 
     # --------------------------------------------------------
-    # Résultat envoyé à Streamlit
+    # Explication
+    #
+    # Elle n'est utile que si :
+    # - l'enfant n'est pas encore scolarisable
+    # - ET la date réelle d'entrée est différente
+    #   de la date des 2 ans et demi
+    # --------------------------------------------------------
+
+    show_explanation = (
+        not_yet_scholarisable
+        and first_entry_date is not None
+        and first_entry_date != theoretical
+    )
+
+    # --------------------------------------------------------
+    # Résultat
     # --------------------------------------------------------
 
     return {
         "dob": dob,
 
-        # Affiché seulement si l'enfant n'a pas encore
-        # atteint 2 ans et 6 mois
         "theoretical": (
             theoretical
             if has_not_reached_age
@@ -425,11 +538,15 @@ def determine_entree_accueil(dob):
 
         "classe": classe,
 
-        # Affiché seulement si l'enfant ne peut pas
-        # encore commencer l'école
         "entry_date": (
             first_entry_date
             if not_yet_scholarisable
+            else None
+        ),
+
+        "explanation": (
+            explanation
+            if show_explanation
             else None
         ),
     }
