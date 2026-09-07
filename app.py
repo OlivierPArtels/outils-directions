@@ -1,4 +1,5 @@
 import streamlit as st
+from classe_maternelle import determine_entree_accueil
 
 st.set_page_config(page_title="Outils Directions", page_icon="🏫", layout="centered")
 
@@ -24,7 +25,23 @@ elif outil == "C4 Assistant":
 
 elif outil == "Classe Maternelle":
     st.title("🧒 Classe Maternelle")
-    st.info("Outil en construction — la logique de calcul sera ajoutée ici.")
+    st.write("Calcule la date d'entrée possible en classe d'accueil selon la date de naissance.")
+
+    dob = st.date_input("Date de naissance de l'enfant", format="DD/MM/YYYY")
+
+    if st.button("Calculer"):
+        result = determine_entree_accueil(dob)
+        if result is None:
+            st.warning("Cet enfant n'est concerné par une entrée en classe d'accueil pendant aucune des trois années scolaires couvertes (2026-2027, 2027-2028, 2028-2029).")
+        else:
+            st.markdown(f"""
+**Date de naissance :** {result['dob'].strftime('%d/%m/%Y')}
+**2 ans et 6 mois :** {result['theoretical'].strftime('%d/%m/%Y')}
+**Année scolaire concernée :** {result['school_year']}
+**Classe :** Accueil
+**Date d'entrée possible :** {result['entry_date'].strftime('%d/%m/%Y')}
+**Explication :** {result['explanation']}
+""")
 
 elif outil == "Doc MDP":
     st.title("📁 Doc MDP")
