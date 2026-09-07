@@ -26,10 +26,9 @@ outil = st.sidebar.radio(
     "Choisir un outil",
     [
         "Accueil",
-        "C4 Assistant",
-        "Classe Maternelle",
         "Doc MDP",
-        "Congés MDP"
+        "Classe Maternelle",
+        "C4 Assistant"
     ]
 )
 
@@ -48,24 +47,23 @@ if outil == "Accueil":
 
     st.markdown(
         """
-        - **C4 Assistant** — calculateur de C4
-        - **Classe Maternelle** — détermine la classe maternelle et la date éventuelle d'entrée
-        - **Doc MDP** — détermine les documents à communiquer
-        - **Congés MDP** — détermine les congés dont peut bénéficier un membre du personnel
+        1. **Doc MDP** — détermine les documents à communiquer
+        2. **Classe Maternelle** — détermine la classe maternelle et la date éventuelle d'entrée
+        3. **C4 Assistant** — calculateur de C4
         """
     )
 
 
 # ============================================================
-# C4 ASSISTANT
+# DOC MDP
 # ============================================================
 
-elif outil == "C4 Assistant":
+elif outil == "Doc MDP":
 
-    st.title("📄 C4 Assistant")
+    st.title("📁 Doc MDP")
 
     st.info(
-        "Outil en construction — la logique de calcul sera ajoutée ici."
+        "Outil en construction — la liste des documents sera ajoutée ici."
     )
 
 
@@ -97,7 +95,6 @@ elif outil == "Classe Maternelle":
 
     if st.button("Calculer"):
 
-        # Date non renseignée
         if not dob_text.strip():
 
             st.warning(
@@ -108,7 +105,6 @@ elif outil == "Classe Maternelle":
 
             try:
 
-                # Conversion du texte en vraie date Python
                 dob = datetime.strptime(
                     dob_text.strip(),
                     "%d/%m/%Y"
@@ -142,7 +138,6 @@ elif outil == "Classe Maternelle":
                     )
 
                     # Date des 2 ans et demi
-                    # uniquement si l'enfant n'a pas encore cet âge
                     if result["theoretical"] is not None:
 
                         st.write(
@@ -157,7 +152,6 @@ elif outil == "Classe Maternelle":
                     )
 
                     # Date d'entrée possible
-                    # uniquement si l'enfant n'est pas encore scolarisable
                     if result["entry_date"] is not None:
 
                         st.write(
@@ -166,18 +160,12 @@ elif outil == "Classe Maternelle":
                         )
 
                     # Explication
-                    # uniquement si la date d'entrée réelle
-                    # diffère de la date des 2 ans et demi
                     if result["explanation"] is not None:
 
                         st.write(
                             f"**Explication :** "
                             f"{result['explanation']}"
                         )
-
-            # ----------------------------------------------------
-            # FORMAT DE DATE INCORRECT
-            # ----------------------------------------------------
 
             except ValueError:
 
@@ -188,26 +176,13 @@ elif outil == "Classe Maternelle":
 
 
 # ============================================================
-# DOC MDP
+# C4 ASSISTANT
 # ============================================================
 
-elif outil == "Doc MDP":
+elif outil == "C4 Assistant":
 
-    st.title("📁 Doc MDP")
+    st.title("📄 C4 Assistant")
 
     st.info(
-        "Outil en construction — la liste des documents sera ajoutée ici."
-    )
-
-
-# ============================================================
-# CONGÉS MDP
-# ============================================================
-
-elif outil == "Congés MDP":
-
-    st.title("🗓️ Congés MDP")
-
-    st.info(
-        "Outil en construction — l'import Excel et le calcul seront ajoutés ici."
+        "Outil en construction — la logique de calcul sera ajoutée ici."
     )
