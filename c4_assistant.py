@@ -25,11 +25,17 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 # doit être repris. Le numéro ONSS ne doit pas être complété.
 BCE_FWB_ENSEIGNEMENT = "0220916609"
 
+# Les fichiers du module sont résolus à partir de l'emplacement réel de
+# c4_assistant.py et non du dossier de travail courant de Streamlit.
+# Cela évite les erreurs de chemin sur Streamlit Community Cloud.
+BASE_DIR = Path(__file__).resolve().parent
+ASSETS_DIR = BASE_DIR / "assets"
+
 # Les PDF officiels vierges doivent être placés dans le dépôt GitHub.
 # Ils servent de fond : le module écrit uniquement les données de la rubrique employeur.
-TEMPLATE_C4_ENSEIGNEMENT = "assets/c4_enseignement_officiel.pdf"
-TEMPLATE_C4_CLASSIQUE = "assets/c4_classique_officiel.pdf"
-FASE_DATABASE_FILE = "assets/etablissements_fase.json"
+TEMPLATE_C4_ENSEIGNEMENT = ASSETS_DIR / "c4_enseignement_officiel.pdf"
+TEMPLATE_C4_CLASSIQUE = ASSETS_DIR / "c4_classique_officiel.pdf"
+FASE_DATABASE_FILE = ASSETS_DIR / "etablissements_fase.json"
 
 # Versions actuellement publiées par l'ONEM au moment de la création du module.
 EXPECTED_C4_ENSEIGNEMENT_VERSION = "06.07.2023/830.10.015"
@@ -99,15 +105,15 @@ def _normalize_fase(value: str | int | float | None) -> str:
         return ""
 
 
-@st.cache_data(show_spinner=False)
 def _load_fase_database() -> tuple[dict[str, dict], str]:
     """Charge le répertoire FASE dérivé du fichier signalétique FWB."""
-    path = Path(FASE_DATABASE_FILE)
+    path = FASE_DATABASE_FILE
 
     if not path.exists():
         return {}, (
             "Le répertoire FASE est absent : "
-            f"{FASE_DATABASE_FILE}. Ajoutez le fichier dans le dépôt GitHub."
+            "assets/etablissements_fase.json. "
+            "Ajoutez le fichier dans le dépôt GitHub."
         )
 
     try:
@@ -618,13 +624,17 @@ def _default_unemployment_reason(end_reason: str) -> str:
 # GENERATION PDF - FORMULAIRES OFFICIELS
 # ============================================================
 
-def _template_bytes(path: str) -> tuple[Optional[bytes], Optional[str]]:
+def _template_bytes(path: str | Path) -> tuple[Optional[bytes], Optional[str]]:
     try:
         with open(path, "rb") as f:
             return f.read(), None
     except FileNotFoundError:
+        try:
+            display_path = str(Path(path).relative_to(BASE_DIR))
+        except Exception:
+            display_path = str(path)
         return None, (
-            f"Le modèle officiel est absent : {path}. "
+            f"Le modèle officiel est absent : {display_path}. "
             "Téléchargez le PDF officiel ONEM et placez-le à cet emplacement dans GitHub."
         )
     except Exception as exc:
