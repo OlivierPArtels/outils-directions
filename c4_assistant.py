@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import calendar
 import io
+import json
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional
@@ -27,6 +29,7 @@ BCE_FWB_ENSEIGNEMENT = "0220916609"
 # Ils servent de fond : le module écrit uniquement les données de la rubrique employeur.
 TEMPLATE_C4_ENSEIGNEMENT = "assets/c4_enseignement_officiel.pdf"
 TEMPLATE_C4_CLASSIQUE = "assets/c4_classique_officiel.pdf"
+FASE_DATABASE_FILE = "assets/etablissements_fase.json"
 
 # Versions actuellement publiées par l'ONEM au moment de la création du module.
 EXPECTED_C4_ENSEIGNEMENT_VERSION = "06.07.2023/830.10.015"
@@ -69,6 +72,64 @@ class PayrollEntry:
 
     absence_or_leave: str = ""
     deferred_pay_detected: bool = False
+
+
+# ============================================================
+# REPERTOIRE FASE DES ETABLISSEMENTS
+# ============================================================
+
+def _normalize_fase(value: str | int | float | None) -> str:
+    """Normalise un numéro FASE pour permettre une recherche fiable."""
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    # Accepte notamment 765, 765.0 ou du texte copié avec espaces.
+    match = re.search(r"\d+(?:[.,]0+)?", text)
+    if not match:
+        return ""
+
+    number = match.group(0).replace(",", ".")
+    try:
+        return str(int(float(number)))
+    except ValueError:
+        return ""
+
+
+@st.cache_data(show_spinner=False)
+def _load_fase_database() -> tuple[dict[str, dict], str]:
+    """Charge le répertoire FASE dérivé du fichier signalétique FWB."""
+    path = Path(FASE_DATABASE_FILE)
+
+    if not path.exists():
+        return {}, (
+            "Le répertoire FASE est absent : "
+            f"{FASE_DATABASE_FILE}. Ajoutez le fichier dans le dépôt GitHub."
+        )
+
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception as exc:
+        return {}, f"Impossible de lire le répertoire FASE : {exc}"
+
+    establishments = payload.get("etablissements", {})
+    if not isinstance(establishments, dict) or not establishments:
+        return {}, "Le répertoire FASE est vide ou invalide."
+
+    return establishments, ""
+
+
+def _fase_establishment_address(record: dict) -> str:
+    parts = [
+        str(record.get("adresse", "")).strip(),
+        str(record.get("code_postal", "")).strip(),
+        str(record.get("localite", "")).strip(),
+    ]
+    return " ".join(part for part in parts if part)
 
 
 # ============================================================
@@ -1569,8 +1630,8 @@ def render_c4_assistant():
                         "Nom": entry.employee_name,
                         "Adresse": entry.employee_address,
                         "Matricule fiche": entry.employee_matricule,
-                        "Établissement": entry.establishment_name,
-                        "Adresse établissement": entry.establishment_address,
+                        "Établissement détecté sur la fiche (non utilisé)": entry.establishment_name,
+                        "Adresse détectée sur la fiche (non utilisée)": entry.establishment_address,
                         "Charge": (
                             f"{entry.q:g}/{entry.s:g}"
                             if entry.q is not None and entry.s is not None
@@ -1636,18 +1697,46 @@ def render_c4_assistant():
         )
 
     with col2:
-        establishment_name = st.text_input(
-            "Établissement",
-            value=base_entry.establishment_name,
-            key="c4_establishment_name",
+        fase_database, fase_database_error = _load_fase_database()
+
+        fase_input = st.text_input(
+            "N° FASE de l'établissement",
+            value="",
+            placeholder="Ex. 765",
+            key="c4_fase_establishment",
+            help=(
+                "Le nom officiel et l'adresse de l'établissement sont récupérés "
+                "dans le fichier signalétique des établissements de la Fédération Wallonie-Bruxelles."
+            ),
         )
 
-        establishment_address = st.text_area(
-            "Adresse de l'établissement",
-            value=base_entry.establishment_address,
-            key="c4_establishment_address",
-            height=90,
-        )
+        fase = _normalize_fase(fase_input)
+        fase_record = fase_database.get(fase) if fase else None
+
+        establishment_name = ""
+        establishment_address = ""
+
+        if fase_database_error:
+            st.error(fase_database_error)
+        elif not fase:
+            st.caption(
+                "Introduisez le numéro FASE : le nom officiel de l'établissement "
+                "et son adresse seront complétés automatiquement."
+            )
+        elif not fase_record:
+            st.error(
+                f"Le numéro FASE {fase} n'a pas été trouvé dans le fichier signalétique FWB."
+            )
+        else:
+            establishment_name = str(fase_record.get("nom", "")).strip()
+            establishment_address = _fase_establishment_address(fase_record)
+
+            st.markdown(f"**Nom officiel :** {establishment_name}")
+            st.markdown(f"**Adresse officielle :** {establishment_address}")
+            st.caption(
+                "Source : fichier signalétique des établissements d'enseignement "
+                "de la Fédération Wallonie-Bruxelles."
+            )
 
         st.text_input(
             "Numéro BCE à reporter",
@@ -2247,10 +2336,14 @@ def render_c4_assistant():
         global_errors.append("Nom et prénom manquants.")
     if not niss.strip():
         global_errors.append("NISS manquant.")
+    if not fase:
+        global_errors.append("Numéro FASE de l'établissement manquant.")
+    elif not fase_record:
+        global_errors.append(f"Numéro FASE {fase} introuvable dans le fichier signalétique FWB.")
     if not establishment_name.strip():
-        global_errors.append("Nom de l'établissement manquant.")
+        global_errors.append("Nom officiel de l'établissement introuvable à partir du FASE.")
     if not establishment_address.strip():
-        global_errors.append("Adresse de l'établissement manquante.")
+        global_errors.append("Adresse officielle de l'établissement introuvable à partir du FASE.")
 
     for i, occ in enumerate(occupation_results, start=1):
         if not occ["fonction"].strip():
@@ -2291,6 +2384,7 @@ def render_c4_assistant():
     summary_lines.append(f"Adresse : {employee_address or 'À compléter'}")
     summary_lines.append("")
     summary_lines.append("ÉTABLISSEMENT")
+    summary_lines.append(f"N° FASE : {fase or 'À compléter'}")
     summary_lines.append(f"Nom : {establishment_name or 'À compléter'}")
     summary_lines.append(f"Adresse : {establishment_address or 'À compléter'}")
     summary_lines.append(f"Numéro BCE : {BCE_FWB_ENSEIGNEMENT}")
@@ -2303,6 +2397,7 @@ def render_c4_assistant():
     st.write(f"**Adresse :** {employee_address or 'À compléter'}")
 
     st.markdown("#### Établissement")
+    st.write(f"**N° FASE :** {fase or 'À compléter'}")
     st.write(f"**Nom :** {establishment_name or 'À compléter'}")
     st.write(f"**Adresse :** {establishment_address or 'À compléter'}")
     st.write(f"**Numéro BCE :** {BCE_FWB_ENSEIGNEMENT}")
@@ -2526,6 +2621,7 @@ def render_c4_assistant():
         "niss": niss,
         "employee_name": employee_name,
         "employee_address": employee_address,
+        "fase": fase,
         "establishment_name": establishment_name,
         "establishment_address": establishment_address,
         "occupations": occupation_results,
