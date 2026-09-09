@@ -100,6 +100,161 @@ def _format_fonction_option(code: str) -> str:
 
 
 # ============================================================
+# CHAMP DATE AVEC / AUTOMATIQUES
+# ============================================================
+
+C4_DATE_INPUT_HTML = """
+<div class="c4-date-widget">
+    <label class="c4-date-label"></label>
+    <input
+        class="c4-date-input"
+        type="text"
+        inputmode="numeric"
+        maxlength="10"
+        placeholder="JJ/MM/AAAA"
+        autocomplete="off"
+    />
+</div>
+"""
+
+C4_DATE_INPUT_CSS = """
+.c4-date-widget {
+    width: 100%;
+    font-family: var(--st-font);
+}
+
+.c4-date-label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-size: 0.875rem;
+    color: var(--st-text-color);
+}
+
+.c4-date-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 0.75rem;
+    font-family: var(--st-font);
+    font-size: 1rem;
+    color: var(--st-text-color);
+    background-color: var(--st-secondary-background-color);
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    border-radius: 0.5rem;
+    outline: none;
+}
+
+.c4-date-input:focus {
+    border-color: var(--st-primary-color);
+    box-shadow: 0 0 0 1px var(--st-primary-color);
+}
+
+.c4-date-input::placeholder {
+    opacity: 0.6;
+}
+"""
+
+C4_DATE_INPUT_JS = r"""
+export default function({
+    parentElement,
+    data,
+    setTriggerValue
+}) {
+    const label = parentElement.querySelector('.c4-date-label');
+    const input = parentElement.querySelector('.c4-date-input');
+
+    if (!label || !input) {
+        return;
+    }
+
+    label.textContent = data?.label ?? 'Date';
+
+    function formatDate(value) {
+        const digits = (value ?? '')
+            .replace(/\D/g, '')
+            .slice(0, 8);
+
+        if (digits.length <= 2) {
+            return digits;
+        }
+
+        if (digits.length <= 4) {
+            return digits.slice(0, 2) + '/' + digits.slice(2);
+        }
+
+        return (
+            digits.slice(0, 2)
+            + '/'
+            + digits.slice(2, 4)
+            + '/'
+            + digits.slice(4)
+        );
+    }
+
+    if (!input.dataset.initialized) {
+        input.value = formatDate(data?.value ?? '');
+        input.dataset.initialized = 'true';
+    }
+
+    input.oninput = function() {
+        input.value = formatDate(input.value);
+    };
+
+    function commitDate() {
+        setTriggerValue('submitted_date', input.value);
+    }
+
+    input.onblur = function() {
+        commitDate();
+    };
+
+    input.onkeydown = function(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            commitDate();
+        }
+    };
+
+    return () => {
+        input.oninput = null;
+        input.onblur = null;
+        input.onkeydown = null;
+    };
+}
+"""
+
+C4_DATE_INPUT_COMPONENT = st.components.v2.component(
+    name="c4_date_masked",
+    html=C4_DATE_INPUT_HTML,
+    css=C4_DATE_INPUT_CSS,
+    js=C4_DATE_INPUT_JS,
+)
+
+
+def _masked_date_input(label: str, key: str, value: str = "") -> str:
+    """Champ texte JJ/MM/AAAA avec insertion automatique des barres obliques."""
+    state_key = f"{key}__masked_value"
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = value or ""
+
+    result = C4_DATE_INPUT_COMPONENT(
+        data={
+            "label": label,
+            "value": st.session_state[state_key],
+        },
+        on_submitted_date_change=lambda: None,
+        key=f"{key}__component",
+        width="stretch",
+    )
+
+    submitted = getattr(result, "submitted_date", None)
+    if submitted is not None:
+        st.session_state[state_key] = str(submitted).strip()
+
+    return str(st.session_state[state_key]).strip()
+
+
+# ============================================================
 # MODELE DE DONNEES - FICHE DE PAIE
 # ============================================================
 
@@ -1387,10 +1542,19 @@ def render_c4_classique():
     st.subheader("4. Données concernant l'occupation")
     c1, c2, c3 = st.columns(3)
     with c1:
-        occupation_start_txt = st.text_input("Date de début de l'occupation", placeholder="JJ/MM/AAAA", key="c4c_occ_start")
-        service_start_txt = st.text_input("Date d'entrée en service", placeholder="JJ/MM/AAAA", key="c4c_service_start")
+        occupation_start_txt = _masked_date_input(
+            "Date de début de l'occupation",
+            key="c4c_occ_start",
+        )
+        service_start_txt = _masked_date_input(
+            "Date d'entrée en service",
+            key="c4c_service_start",
+        )
     with c2:
-        occupation_end_txt = st.text_input("Date de fin de l'occupation", placeholder="JJ/MM/AAAA", key="c4c_occ_end")
+        occupation_end_txt = _masked_date_input(
+            "Date de fin de l'occupation",
+            key="c4c_occ_end",
+        )
         worker_code = st.text_input("Code travailleur", key="c4c_worker_code")
     with c3:
         status = st.text_input("Statut", key="c4c_status")
@@ -1914,17 +2078,13 @@ def render_c4_assistant():
             )
             statut = _status_value(status_index)
 
-            start_text = st.text_input(
+            start_text = _masked_date_input(
                 "Date d'entrée dans cette occupation",
-                value="",
-                placeholder="JJ/MM/AAAA",
                 key=f"{prefix}_start",
             )
 
-            end_text = st.text_input(
+            end_text = _masked_date_input(
                 "Date de fin effective de cette occupation",
-                value="",
-                placeholder="JJ/MM/AAAA",
                 key=f"{prefix}_end",
             )
 
@@ -2444,168 +2604,10 @@ def render_c4_assistant():
         st.success("Les contrôles de base sont satisfaits.")
 
     # --------------------------------------------------------
-    # 8. RESUME A REPORTER SUR LE C4
+    # 8. C4-ENSEIGNEMENT PRET A IMPRIMER
     # --------------------------------------------------------
 
-    st.subheader("8. Résumé à reporter sur le C4-Enseignement")
-
-    if global_errors:
-        st.info(
-            "Le résumé est affiché, mais les avertissements ci-dessus doivent être vérifiés avant d'utiliser les montants."
-        )
-
-    summary_lines: list[str] = []
-
-    summary_lines.append("C4-ENSEIGNEMENT — RÉCAPITULATIF")
-    summary_lines.append("================================")
-    summary_lines.append("")
-    summary_lines.append("ENSEIGNANT")
-    summary_lines.append(f"NISS : {niss or 'À compléter'}")
-    summary_lines.append(f"Nom et prénom : {employee_name or 'À compléter'}")
-    summary_lines.append(f"Adresse : {employee_address or 'À compléter'}")
-    summary_lines.append("")
-    summary_lines.append("ÉTABLISSEMENT")
-    summary_lines.append(f"N° FASE : {fase or 'À compléter'}")
-    summary_lines.append(f"Nom : {establishment_name or 'À compléter'}")
-    summary_lines.append(f"Adresse : {establishment_address or 'À compléter'}")
-    summary_lines.append(f"Numéro BCE : {BCE_FWB_ENSEIGNEMENT}")
-    summary_lines.append("Numéro ONSS : ne pas compléter")
-    summary_lines.append("")
-
-    st.markdown("#### Enseignant")
-    st.write(f"**NISS :** {niss or 'À compléter'}")
-    st.write(f"**Nom et prénom :** {employee_name or 'À compléter'}")
-    st.write(f"**Adresse :** {employee_address or 'À compléter'}")
-
-    st.markdown("#### Établissement")
-    st.write(f"**N° FASE :** {fase or 'À compléter'}")
-    st.write(f"**Nom :** {establishment_name or 'À compléter'}")
-    st.write(f"**Adresse :** {establishment_address or 'À compléter'}")
-    st.write(f"**Numéro BCE :** {BCE_FWB_ENSEIGNEMENT}")
-    st.write("**Numéro ONSS :** ne pas compléter")
-
-    for i, occ in enumerate(occupation_results, start=1):
-        st.markdown(f"#### Occupation {i}")
-
-        st.write(f"**Fonction :** {occ['fonction'] or 'À compléter'}")
-        st.write(f"**Statut :** {occ['statut']}")
-        st.write(f"**Date d'entrée :** {_format_date(occ['start_date']) or 'À compléter'}")
-        st.write(f"**Date de fin :** {_format_date(occ['end_date']) or 'À compléter'}")
-        st.write(
-            f"**Fraction de charge :** Q {occ['q']:.2f} / S {occ['s']:.2f}".replace('.', ',')
-        )
-        st.write(
-            "**Index repris sur la fiche :** "
-            + (f"{occ['index_value']:.4f}".replace(".", ",") if occ['index_value'] is not None else "non détecté")
-        )
-        st.write(
-            f"**Salaire mensuel brut indexé :** {_format_money(occ['salary_monthly'])}"
-        )
-
-        if occ["dmfa_state"] == "Non / le salaire brut exact doit être complété":
-            st.write(
-                f"**Salaire brut exact :** {_format_money(occ['exact_total'])} "
-                f"pour le trimestre {occ['quarter_label']}"
-            )
-        elif occ["dmfa_state"] == "Oui / ne pas compléter le salaire brut exact":
-            st.write("**Salaire brut exact :** ne pas compléter")
-        elif occ["dmfa_state"]:
-            st.write("**Salaire brut exact :** à vérifier")
-
-        st.write(f"**Mode de paiement :** {occ['mode_payment']}")
-        st.write(f"**Cotisations ONSS :** {occ['onss_text']}")
-
-        summary_lines.append(f"OCCUPATION {i}")
-        summary_lines.append(f"Fonction : {occ['fonction'] or 'À compléter'}")
-        summary_lines.append(f"Statut : {occ['statut']}")
-        summary_lines.append(
-            f"Date d'entrée : {_format_date(occ['start_date']) or 'À compléter'}"
-        )
-        summary_lines.append(
-            f"Date de fin : {_format_date(occ['end_date']) or 'À compléter'}"
-        )
-        summary_lines.append(f"Fraction : {occ['q']:g}/{occ['s']:g}")
-        summary_lines.append(
-            "Index repris sur la fiche : "
-            + (f"{occ['index_value']:.4f}".replace(".", ",") if occ['index_value'] is not None else "non détecté")
-        )
-        summary_lines.append(
-            f"Salaire mensuel brut indexé : {_format_money(occ['salary_monthly'])}"
-        )
-
-        if occ["dmfa_state"] == "Non / le salaire brut exact doit être complété":
-            summary_lines.append(
-                f"Salaire brut exact : {_format_money(occ['exact_total'])} "
-                f"— trimestre {occ['quarter_label']}"
-            )
-        elif occ["dmfa_state"] == "Oui / ne pas compléter le salaire brut exact":
-            summary_lines.append("Salaire brut exact : ne pas compléter")
-        elif occ["dmfa_state"]:
-            summary_lines.append("Salaire brut exact : à vérifier")
-
-        summary_lines.append(f"Mode de paiement : {occ['mode_payment']}")
-        summary_lines.append(f"Cotisations ONSS : {occ['onss_text']}")
-        summary_lines.append("")
-
-    st.markdown("#### Interruptions")
-    summary_lines.append("INTERRUPTIONS")
-
-    if not interruption_rows:
-        st.write("**Sans interruption**")
-        summary_lines.append("Sans interruption")
-    else:
-        for row in interruption_rows:
-            if row["kind"] == "Protection de la maternité":
-                label = (
-                    f"Protection de la maternité — du {_format_date(row['start'])} "
-                    f"au {_format_date(row['end'])}"
-                )
-            else:
-                label = (
-                    f"Autres événements — {row['nature']} — du {_format_date(row['start'])} "
-                    f"au {_format_date(row['end'])}"
-                )
-
-            st.write(f"- {label}")
-            summary_lines.append(label)
-
-    summary_lines.append("")
-    summary_lines.append("FIN DE LA DERNIÈRE OCCUPATION")
-
-    last_end_text = _format_date(final_end_date) if final_end_date else "À compléter"
-
-    if end_reason == "Fin de plein droit et sans préavis":
-        end_text = f"L'occupation a pris fin de plein droit et sans préavis le {last_end_text}."
-    elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation avec préavis":
-        end_text = f"Le pouvoir organisateur a mis fin à l'occupation — préavis à compléter — fin effective {last_end_text}."
-    elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation sans préavis":
-        end_text = f"Le pouvoir organisateur a mis fin à l'occupation sans préavis le {last_end_text}."
-    elif end_reason == "Le membre du personnel a quitté volontairement son emploi":
-        end_text = f"Le membre du personnel a quitté volontairement son emploi le {last_end_text}."
-    else:
-        end_text = "Fin de la dernière occupation : à compléter manuellement."
-
-    st.markdown("#### Fin de la dernière occupation")
-    st.write(end_text)
-    if motif_chomage_pdf:
-        st.write(f"**Motif du chômage :** {motif_chomage_pdf}")
-
-    summary_lines.append(end_text)
-    if motif_chomage_pdf:
-        summary_lines.append(f"Motif du chômage : {motif_chomage_pdf}")
-
-    summary_text = "\n".join(summary_lines)
-
-    with st.expander("Télécharger aussi le récapitulatif de contrôle"):
-        st.download_button(
-            "Télécharger le récapitulatif (.txt)",
-            data=summary_text.encode("utf-8"),
-            file_name="recapitulatif_c4_enseignement.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-
-    st.subheader("9. C4-Enseignement prêt à imprimer")
+    st.subheader("8. C4-Enseignement prêt à imprimer")
 
     responsible_name = st.text_input(
         "Nom du responsable / délégué qui signera le C4",
