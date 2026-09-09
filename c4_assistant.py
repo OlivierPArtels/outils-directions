@@ -43,6 +43,63 @@ EXPECTED_C4_CLASSIQUE_VERSION = "06.07.2023/830.10.016"
 
 
 # ============================================================
+# FONCTIONS ENSEIGNEMENT
+# ============================================================
+
+# Liste reprise de ProEco à partir des fonctions communiquées.
+# Le code est affiché dans le menu pour faciliter le choix, mais seul
+# l’intitulé complet est imprimé sur le C4.
+# KI — Kinésithérapeute est volontairement exclu.
+FONCTIONS_ENSEIGNEMENT: list[tuple[str, str]] = [
+    ("DIM", "Directeur d'école maternelle"),
+    ("DIF", "Directeur d'école fondamentale"),
+    ("D", "Directeur d'école"),
+    ("DC", "Directeur avec classe"),
+    ("DIP", "Directeur d'école primaire"),
+    ("IP", "Instituteur Primaire"),
+    ("IINEE", "Instituteur Primaire Immersion en Néerlandais"),
+    ("II", "Instituteur Primaire Immersion"),
+    ("IIANG", "Instituteur Primaire Immersion en Anglais"),
+    ("IIALL", "Instituteur Primaire Immersion en Allemand"),
+    ("IISIG", "Instituteur Primaire Immersion en Langue des signes"),
+    ("IM", "Instituteur Maternel"),
+    ("IHNEE", "Instituteur Maternel Immersion en Néerlandais"),
+    ("IH", "Instituteur Maternel Immersion"),
+    ("IHANG", "Instituteur Maternel Immersion en Anglais"),
+    ("IHALL", "Instituteur Maternel Immersion en Allemand"),
+    ("IHSIG", "Instituteur Maternel Immersion en Langue des signes"),
+    ("MP", "Maître de Psychomotricité"),
+    ("MM", "Maître de Morale"),
+    ("ML", "Maître de Seconde Langue"),
+    ("MLNEE", "Maître de Seconde Langue : Néerlandais"),
+    ("MLANG", "Maître de Seconde Langue : Anglais"),
+    ("MLALL", "Maître de Seconde Langue : Allemand"),
+    ("ME", "Maître d'Education Physique"),
+    ("MC", "Maître de Travaux Manuels"),
+    ("MU", "Maître d'Education Musicale"),
+    ("MR", "Maître de Religion"),
+    ("MRCAT", "Maître de Religion Catholique"),
+    ("MRISL", "Maître de Religion Islamique"),
+    ("MRISR", "Maître de Religion Israélite"),
+    ("MRORT", "Maître de Religion Orthodoxe"),
+    ("MRPRO", "Maître de Religion Protestante"),
+    ("MI", "Maître Education Physique Immersion"),
+    ("MINEE", "Maître Education Physique Immersion en Néerlandais"),
+    ("MIANG", "Maître Education Physique Immersion en Anglais"),
+    ("MIALL", "Maître Education Physique Immersion en Allemand"),
+    ("MISIG", "Maître Education Physique Immersion en Langue des signes"),
+]
+
+FONCTIONS_PAR_CODE = dict(FONCTIONS_ENSEIGNEMENT)
+
+
+def _format_fonction_option(code: str) -> str:
+    if not code:
+        return "— Sélectionner une fonction —"
+    return f"{code} — {FONCTIONS_PAR_CODE[code]}"
+
+
+# ============================================================
 # MODELE DE DONNEES - FICHE DE PAIE
 # ============================================================
 
@@ -1833,11 +1890,18 @@ def render_c4_assistant():
         col_a, col_b = st.columns(2)
 
         with col_a:
-            fonction = st.text_input(
+            fonction_code = st.selectbox(
                 "Fonction",
-                value="",
+                options=[""] + [code for code, _ in FONCTIONS_ENSEIGNEMENT],
+                format_func=_format_fonction_option,
+                index=0,
                 key=f"{prefix}_fonction",
+                help=(
+                    "Le menu affiche le code ProEco et l'intitulé complet. "
+                    "Seul l'intitulé complet sera imprimé sur le C4."
+                ),
             )
+            fonction = FONCTIONS_PAR_CODE.get(fonction_code, "")
 
             status_index = st.selectbox(
                 "Statut à reporter",
@@ -1920,6 +1984,11 @@ def render_c4_assistant():
         if start_date and end_date and end_date < start_date:
             global_errors.append(
                 f"Occupation {occ_index} — la date de fin est antérieure à la date d'entrée."
+            )
+
+        if not fonction:
+            global_errors.append(
+                f"Occupation {occ_index} — sélectionnez une fonction."
             )
 
         salary_monthly = None
