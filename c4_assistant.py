@@ -11,6 +11,7 @@ import streamlit as st
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 
 # ============================================================
@@ -532,6 +533,26 @@ def _status_value(index: int) -> str:
     ][index]
 
 
+def _default_unemployment_reason(end_reason: str) -> str:
+    """Libellé proposé automatiquement pour la zone « Motif du chômage ».
+
+    Le texte reste modifiable par la direction dans l'interface.
+    """
+    mapping = {
+        "Fin de plein droit et sans préavis": "Fin de l'occupation de plein droit",
+        "Le pouvoir organisateur a mis fin à l'occupation avec préavis": (
+            "Fin de l'occupation à l'initiative du pouvoir organisateur avec préavis"
+        ),
+        "Le pouvoir organisateur a mis fin à l'occupation sans préavis": (
+            "Fin de l'occupation à l'initiative du pouvoir organisateur sans préavis"
+        ),
+        "Le membre du personnel a quitté volontairement son emploi": (
+            "Départ volontaire du membre du personnel"
+        ),
+    }
+    return mapping.get(end_reason, "")
+
+
 # ============================================================
 # GENERATION PDF - FORMULAIRES OFFICIELS
 # ============================================================
@@ -688,186 +709,353 @@ def _quarter_parts(label: str) -> tuple[str, str]:
     return q, year
 
 
+def _mask_pdf_area(c, x: float, y: float, width: float, height: float):
+    """Masque uniquement la zone de saisie, sans toucher aux libellés du formulaire."""
+    if width <= 0 or height <= 0:
+        return
+    c.saveState()
+    c.setFillColorRGB(1, 1, 1)
+    c.setStrokeColorRGB(1, 1, 1)
+    c.rect(x, y, width, height, stroke=0, fill=1)
+    c.restoreState()
+
+
+def _fit_text_size(text: str, max_width: float, preferred: float, minimum: float = 5.8) -> float:
+    value = str(text or "").strip()
+    if not value or max_width <= 0:
+        return preferred
+    size = preferred
+    while size > minimum and stringWidth(value, "Helvetica", size) > max_width:
+        size -= 0.2
+    return max(size, minimum)
+
+
+def _draw_clean_value(
+    c,
+    x: float,
+    y: float,
+    text: object,
+    *,
+    size: float = 7.6,
+    max_width: Optional[float] = None,
+    mask_width: Optional[float] = None,
+    align: str = "left",
+):
+    """
+    Inscrit une valeur proprement sur le formulaire.
+
+    Les pointillés / tirets préimprimés sont masqués uniquement sous la valeur afin
+    d'éviter l'effet « texte posé sur les tirets » visible lors des premiers tests.
+    """
+    if text is None:
+        return
+    value = str(text).strip()
+    if not value:
+        return
+
+    available = max_width if max_width is not None else 9999.0
+    font_size = _fit_text_size(value, available, size)
+    text_width = stringWidth(value, "Helvetica", font_size)
+
+    if align == "right":
+        text_x = x - text_width
+        area_x = text_x - 1.2
+    else:
+        text_x = x
+        area_x = x - 1.2
+
+    area_width = mask_width if mask_width is not None else text_width + 2.6
+    if align == "right" and mask_width is not None:
+        area_x = x - mask_width
+
+    _mask_pdf_area(c, area_x, y - 1.8, area_width, font_size + 3.1)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica", font_size)
+    c.drawString(text_x, y, value)
+
+
+def _draw_clean_date(c, x: float, y: float, value: Optional[date], mask_width: float = 91.0, size: float = 7.5):
+    if not value:
+        return
+    _mask_pdf_area(c, x - 1.0, y - 1.8, mask_width, size + 3.1)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica", size)
+    c.drawString(x, y, value.strftime("%d/%m/%Y"))
+
+
+def _draw_clean_money(c, x_right: float, y: float, value: Optional[float], field_left: float, field_width: float, size: float = 7.5):
+    if value is None:
+        return
+    txt = f"{float(value):.2f}".replace(".", ",")
+    _mask_pdf_area(c, field_left, y - 1.8, field_width, size + 3.1)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica", size)
+    c.drawRightString(x_right, y, txt)
+
+
+def _draw_box_x(c, left: float, bottom: float, width: float = 6.5, height: float = 6.5):
+    """Centre un X dans une case préimprimée du formulaire."""
+    size = min(5.1, height * 0.82)
+    x_width = stringWidth("X", "Helvetica-Bold", size)
+    x = left + (width - x_width) / 2.0
+    # Helvetica n'a pas de descendeur sur X; ce calcul centre le corps du glyphe.
+    y = bottom + (height - size * 0.72) / 2.0
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", size)
+    c.drawString(x, y, "X")
+
+
+def _draw_clean_fraction(c, x: float, y: float, value: Optional[float], field_width: float = 65.0, size: float = 7.6):
+    if value is None:
+        return
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return
+    if abs(numeric - round(numeric)) < 1e-9:
+        txt = str(int(round(numeric)))
+    else:
+        txt = f"{numeric:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    _mask_pdf_area(c, x - 1.0, y - 1.8, field_width, size + 3.1)
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica", size)
+    c.drawString(x, y, txt)
+
+
 def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
     """
-    Remplit le C4-Enseignement ONEM 06.07.2023/830.10.015.
+    Génère le C4-Enseignement ONEM 06.07.2023/830.10.015.
 
-    Les coordonnées ci-dessous ont été recalibrées sur un PDF réellement généré
-    avec le formulaire officiel afin que les valeurs se placent sur les lignes et
-    que les X restent à l'intérieur des cases.
+    Cette version utilise une table de coordonnées relevées directement sur le
+    formulaire officiel. Les zones préimprimées sont masquées uniquement sous les
+    valeurs, ce qui donne un résultat nettement plus propre à l'impression.
     """
     occupations = data.get("occupations", [])
     interruptions = data.get("interruptions", [])
 
-    # Décalage vertical entre les trois cadres d'occupation du formulaire.
-    block_shift = [0.0, 149.4, 298.6]
+    # Coordonnées relevées sur les trois cadres du formulaire officiel.
+    occ_layouts = [
+        {
+            "function_y": 571.2, "status_y": 555.7, "q_y": 538.2, "s_y": 524.3,
+            "entry_y": 571.2, "end_y": 555.7, "salary_y": 536.2,
+            "exact1_y": 521.9, "exact2_y": 505.8,
+            "mode_boxes": [(325.2, 492.8, 4.8, 4.8), (341.5, 492.8, 4.8, 4.8), (357.8, 492.8, 4.8, 4.8)],
+            "onss_boxes": [(186.2, 474.4, 5.8, 5.8), (186.2, 464.3, 5.8, 5.8), (186.2, 454.9, 5.8, 5.8), (186.2, 444.8, 5.8, 5.8)],
+            "onss_date_y": 462.7,
+        },
+        {
+            "function_y": 421.6, "status_y": 406.1, "q_y": 388.6, "s_y": 374.7,
+            "entry_y": 421.6, "end_y": 406.1, "salary_y": 386.6,
+            "exact1_y": 372.3, "exact2_y": 356.2,
+            "mode_boxes": [(324.5, 338.8, 4.8, 4.8), (340.8, 338.8, 4.8, 4.8), (357.4, 338.8, 4.8, 4.8)],
+            "onss_boxes": [(186.2, 325.3, 5.8, 5.8), (186.2, 315.2, 5.8, 5.8), (186.2, 305.9, 5.8, 5.8), (186.2, 295.8, 5.8, 5.8)],
+            "onss_date_y": 313.5,
+        },
+        {
+            "function_y": 272.4, "status_y": 256.9, "q_y": 239.4, "s_y": 225.5,
+            "entry_y": 272.4, "end_y": 256.9, "salary_y": 237.4,
+            "exact1_y": 223.1, "exact2_y": 207.0,
+            "mode_boxes": [(324.5, 189.5, 4.8, 4.8), (340.8, 189.5, 4.8, 4.8), (357.4, 189.5, 4.8, 4.8)],
+            "onss_boxes": [(186.2, 176.3, 5.8, 5.8), (186.2, 166.2, 5.8, 5.8), (186.2, 156.6, 5.8, 5.8), (186.2, 146.5, 5.8, 5.8)],
+            "onss_date_y": 164.5,
+        },
+    ]
 
     def page1(c):
         # ----------------------------------------------------
         # IDENTITE / ETABLISSEMENT
         # ----------------------------------------------------
-        _draw_niss(c, 93, 721, data.get("niss", ""), 8.0)
-        _draw_text(c, 252, 721, data.get("employee_name", ""), 8.0, 72)
-        _draw_multiline(c, 88, 695, data.get("employee_address", ""), 7.8, 9.0, 105)
-        _draw_text(c, 168, 668, data.get("establishment_name", ""), 7.8, 88)
-        _draw_multiline(c, 30, 644, data.get("establishment_address", ""), 7.8, 9.0, 110)
-        _draw_text(c, 53, 618, BCE_FWB_ENSEIGNEMENT, 8.0)
+        niss = re.sub(r"\D", "", data.get("niss", "") or "")
+        if len(niss) == 11:
+            niss = f"{niss[:6]}/{niss[6:9]}-{niss[9:]}"
+
+        _draw_clean_value(c, 91, 721.0, niss, size=7.7, max_width=96, mask_width=98)
+        _draw_clean_value(c, 252, 721.0, data.get("employee_name", ""), size=7.7, max_width=285)
+        _draw_clean_value(c, 88, 695.0, data.get("employee_address", ""), size=7.4, max_width=455)
+        _draw_clean_value(c, 168, 668.0, data.get("establishment_name", ""), size=7.5, max_width=380)
+        _draw_clean_value(c, 30, 644.0, data.get("establishment_address", ""), size=7.4, max_width=520)
+        _draw_clean_value(c, 52, 618.0, BCE_FWB_ENSEIGNEMENT, size=7.7, max_width=95, mask_width=102)
 
         # ----------------------------------------------------
-        # OCCUPATIONS (maximum 3)
+        # OCCUPATIONS - MAXIMUM 3
         # ----------------------------------------------------
         for idx, occ in enumerate(occupations[:3]):
-            d = block_shift[idx]
+            lay = occ_layouts[idx]
 
-            # Fonction / statut : commencer après le libellé, sur la ligne pointillée.
-            _draw_text(c, 68, 573 - d, occ.get("fonction", ""), 7.6, 45)
-            _draw_text(c, 68, 557 - d, occ.get("statut", ""), 7.6, 42)
+            _draw_clean_value(c, 62, lay["function_y"], occ.get("fonction", ""), size=7.35, max_width=172)
+            _draw_clean_value(c, 55, lay["status_y"], occ.get("statut", ""), size=7.35, max_width=180)
 
-            # Q/S : ne pas imprimer ,00 lorsque la valeur est entière.
-            _draw_fraction_number(c, 132, 542 - d, occ.get("q"), 7.8)
-            _draw_fraction_number(c, 132, 528 - d, occ.get("s"), 7.8)
+            # On masque toute la zone Q/S afin de supprimer les virgules et tirets préimprimés.
+            _draw_clean_fraction(c, 132, lay["q_y"], occ.get("q"), field_width=66, size=7.6)
+            _draw_clean_fraction(c, 132, lay["s_y"], occ.get("s"), field_width=66, size=7.6)
 
-            # Dates d'occupation.
-            _draw_date(c, 304, 571 - d, occ.get("start_date"), 7.8)
-            _draw_date(c, 304, 555 - d, occ.get("end_date"), 7.8)
+            _draw_clean_date(c, 304, lay["entry_y"], occ.get("start_date"), mask_width=92, size=7.45)
+            _draw_clean_date(c, 304, lay["end_y"], occ.get("end_date"), mask_width=92, size=7.45)
 
-            # Salaire mensuel : dans la zone prévue, après le libellé.
-            _draw_decimal(c, 349, 537 - d, occ.get("salary_monthly"), 2, 7.8)
+            # Montants alignés à droite dans leurs zones.
+            _draw_clean_money(c, 431, lay["salary_y"], occ.get("salary_monthly"), 347, 86, size=7.45)
 
-            # Salaire brut exact : uniquement si nécessaire.
             if occ.get("dmfa_state") == "Non / le salaire brut exact doit être complété":
-                _draw_decimal(c, 329, 521 - d, occ.get("exact_total"), 2, 7.8)
+                _draw_clean_money(c, 416, lay["exact1_y"], occ.get("exact_total"), 327, 91, size=7.35)
                 qtr, year = _quarter_parts(occ.get("quarter_label", ""))
-                _draw_text(c, 494, 521 - d, qtr, 7.6)
-                _draw_text(c, 516, 521 - d, year, 7.6)
+                quarter_text = f"{qtr}/{year}" if qtr and year else ""
+                _draw_clean_value(c, 493, lay["exact1_y"], quarter_text, size=7.2, max_width=61, mask_width=63)
 
-            # Mode de paiement : X au centre des cases 10 / 12 / 20.
+            # Mode de paiement - les X sont centrés dans les cases réelles.
             mode = str(occ.get("mode_payment", ""))
-            _draw_form_x(c, 325.2, 488 - d, mode == "10")
-            _draw_form_x(c, 341.5, 488 - d, mode == "12")
-            _draw_form_x(c, 357.9, 488 - d, mode == "20")
+            for value, box in zip(("10", "12", "20"), lay["mode_boxes"]):
+                if mode == value:
+                    _draw_box_x(c, *box)
 
             # Cotisations ONSS.
-            onss_text = occ.get("onss_text", "") or ""
-            _draw_form_x(
-                c, 186.5, 475 - d,
-                onss_text.startswith("ont été prélevées") and "du " not in onss_text,
-            )
+            onss_text = (occ.get("onss_text", "") or "").strip()
+            box1, box2, box3, box4 = lay["onss_boxes"]
 
             if onss_text.startswith("ont été prélevées du"):
-                _draw_form_x(c, 186.5, 465 - d, True)
-                # Les dates commencent immédiatement après "du" et "au".
-                _draw_date(c, 253, 465 - d, occ.get("start_date"), 7.0)
-                _draw_date(c, 350, 465 - d, occ.get("end_date"), 7.0)
-
-            _draw_form_x(
-                c, 186.5, 456 - d,
-                onss_text.startswith("n'ont pas été prélevées"),
-            )
-            _draw_form_x(
-                c, 186.5, 446 - d,
-                onss_text.startswith("seront versées"),
-            )
+                _draw_box_x(c, *box2)
+                _draw_clean_date(c, 252, lay["onss_date_y"], occ.get("start_date"), mask_width=84, size=6.8)
+                _draw_clean_date(c, 348, lay["onss_date_y"], occ.get("end_date"), mask_width=92, size=6.8)
+            elif onss_text.startswith("ont été prélevées"):
+                _draw_box_x(c, *box1)
+            elif onss_text.startswith("n'ont pas été prélevées"):
+                _draw_box_x(c, *box3)
+            elif onss_text.startswith("seront versées"):
+                _draw_box_x(c, *box4)
 
         # ----------------------------------------------------
         # INTERRUPTIONS
         # ----------------------------------------------------
         if interruptions:
-            _draw_form_x(c, 128.2, 95, True)  # avec interruption
+            _draw_box_x(c, 128.4, 93.2, 6.5, 6.5)  # avec interruption
             for row in interruptions[:2]:
                 if row.get("kind") == "Protection de la maternité":
-                    _draw_form_x(c, 203.8, 95, True)
-                    _draw_date(c, 329, 95, row.get("start"), 6.8)
-                    _draw_date(c, 434, 95, row.get("end"), 6.8)
+                    _draw_box_x(c, 204.0, 93.2, 6.5, 6.5)
+                    _draw_clean_date(c, 328.5, 91.2, row.get("start"), mask_width=89, size=6.6)
+                    _draw_clean_date(c, 433.0, 91.2, row.get("end"), mask_width=89, size=6.6)
                 else:
-                    _draw_form_x(c, 203.8, 83, True)
-                    _draw_date(c, 329, 83, row.get("start"), 6.8)
-                    _draw_date(c, 434, 83, row.get("end"), 6.8)
-                    _draw_text(c, 394, 69, row.get("nature", ""), 6.8, 55)
+                    _draw_box_x(c, 204.0, 81.2, 6.5, 6.5)
+                    _draw_clean_date(c, 328.5, 79.2, row.get("start"), mask_width=89, size=6.6)
+                    _draw_clean_date(c, 433.0, 79.2, row.get("end"), mask_width=89, size=6.6)
+                    _draw_clean_value(c, 394, 68.5, row.get("nature", ""), size=6.5, max_width=140)
         else:
-            _draw_form_x(c, 35.0, 95, True)  # sans interruption
+            _draw_box_x(c, 35.0, 93.2, 6.5, 6.5)  # sans interruption
 
-        _draw_text(c, 70, 49, data.get("remarks", ""), 7.0, 120)
+        _draw_clean_value(c, 68, 50.4, data.get("remarks", ""), size=6.7, max_width=465)
 
     def page2(c):
         # ----------------------------------------------------
         # NISS
         # ----------------------------------------------------
-        _draw_niss(c, 145, 806, data.get("niss", ""), 8.0)
+        niss = re.sub(r"\D", "", data.get("niss", "") or "")
+        if len(niss) == 11:
+            niss = f"{niss[:6]}/{niss[6:9]}-{niss[9:]}"
+        _draw_clean_value(c, 142, 803.6, niss, size=7.5, max_width=145, mask_width=147)
 
         end_date = data.get("final_end_date")
         end_reason = data.get("end_reason", "")
 
         # ----------------------------------------------------
-        # FIN DE L'OCCUPATION
+        # DONNEES RELATIVES A LA FIN DE LA DERNIERE OCCUPATION
         # ----------------------------------------------------
         if end_reason == "Fin de plein droit et sans préavis":
-            _draw_date(c, 221, 768, end_date, 7.8)
+            # Cette ligne n'a volontairement PAS de case à cocher sur le formulaire ONEM.
+            _draw_clean_date(c, 211, 765.2, end_date, mask_width=92, size=7.4)
 
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation avec préavis":
-            _draw_form_x(c, 29.2, 722, True)
-            _draw_date(c, 210, 720, end_date, 7.6)
+            _draw_box_x(c, 29.5, 719.2, 6.5, 6.5)
+            _draw_clean_date(c, 209, 717.2, end_date, mask_width=90, size=7.2)
 
             notice_method = data.get("notice_method", "Lettre recommandée")
-            _draw_form_x(c, 141.8, 704, notice_method == "Lettre recommandée")
-            _draw_form_x(c, 141.8, 686, notice_method == "Exploit d'huissier")
+            if notice_method == "Lettre recommandée":
+                _draw_box_x(c, 141.8, 701.2, 6.5, 6.5)
+            elif notice_method == "Exploit d'huissier":
+                _draw_box_x(c, 141.8, 683.2, 6.5, 6.5)
 
-            _draw_date(c, 158, 668, data.get("notice_start"), 7.2)
-            _draw_date(c, 262, 668, data.get("notice_end"), 7.2)
+            _draw_clean_date(c, 157, 663.2, data.get("notice_start"), mask_width=89, size=7.0)
+            _draw_clean_date(c, 261, 663.2, data.get("notice_end"), mask_width=89, size=7.0)
 
             suspended = bool(data.get("notice_suspended"))
-            _draw_form_x(c, 159.5, 650, not suspended)
-            _draw_form_x(c, 251.5, 650, suspended)
+            if suspended:
+                _draw_box_x(c, 251.8, 647.2, 6.5, 6.5)
+            else:
+                _draw_box_x(c, 159.6, 647.2, 6.5, 6.5)
 
             if suspended:
                 suspension_reason = data.get("notice_suspension_reason", "")
-                _draw_form_x(c, 377.0, 650, suspension_reason == "Maladie")
-                _draw_form_x(c, 377.2, 632, suspension_reason == "Vacances")
-                _draw_form_x(
-                    c, 377.2, 614,
-                    suspension_reason not in ("", "Maladie", "Vacances"),
-                )
-                if suspension_reason not in ("", "Maladie", "Vacances"):
-                    _draw_text(c, 409, 612, suspension_reason, 7.0, 40)
-                _draw_date(c, 189, 596, data.get("notice_extended_until"), 7.2)
+                if suspension_reason == "Maladie":
+                    _draw_box_x(c, 377.3, 647.2, 6.5, 6.5)
+                elif suspension_reason == "Vacances":
+                    _draw_box_x(c, 377.3, 629.2, 6.5, 6.5)
+                elif suspension_reason:
+                    _draw_box_x(c, 377.3, 611.2, 6.5, 6.5)
+                    _draw_clean_value(c, 412, 610.4, suspension_reason, size=6.8, max_width=125)
+                _draw_clean_date(c, 189, 594.0, data.get("notice_extended_until"), mask_width=90, size=7.0)
 
             transition = bool(data.get("transition"))
-            _draw_form_x(c, 79.0, 562, not transition)
-            _draw_form_x(c, 106.7, 562, transition)
             if transition:
-                _draw_date(c, 142, 560, data.get("transition_start"), 7.0)
-                _draw_date(c, 246, 560, data.get("transition_end"), 7.0)
+                _draw_box_x(c, 106.8, 560.0, 5.8, 5.8)
+                _draw_clean_date(c, 141, 558.0, data.get("transition_start"), mask_width=89, size=6.8)
+                _draw_clean_date(c, 246, 558.0, data.get("transition_end"), mask_width=89, size=6.8)
+            else:
+                _draw_box_x(c, 79.0, 560.0, 6.0, 5.8)
 
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation sans préavis":
-            _draw_form_x(c, 29.2, 515, True)
-            _draw_date(c, 253, 514, end_date, 7.6)
+            _draw_box_x(c, 29.5, 512.0, 6.5, 6.5)
+            _draw_clean_date(c, 253, 510.0, end_date, mask_width=90, size=7.2)
 
         elif end_reason == "Le membre du personnel a quitté volontairement son emploi":
-            _draw_form_x(c, 29.2, 497, True)
-            _draw_date(c, 212, 496, end_date, 7.6)
+            _draw_box_x(c, 29.5, 494.0, 6.5, 6.5)
+            _draw_clean_date(c, 211, 492.0, end_date, mask_width=90, size=7.2)
 
         # ----------------------------------------------------
         # INDEMNITE DE RUPTURE
         # ----------------------------------------------------
         if data.get("rupture_indemnity"):
-            _draw_form_x(c, 29.2, 740, True)
-            _draw_date(c, 249, 738, data.get("rupture_start"), 7.2)
-            _draw_date(c, 356, 738, data.get("rupture_end"), 7.2)
+            _draw_box_x(c, 29.5, 737.2, 6.5, 6.5)
+            _draw_clean_date(c, 248.5, 735.2, data.get("rupture_start"), mask_width=89, size=7.0)
+            _draw_clean_date(c, 355.0, 735.2, data.get("rupture_end"), mask_width=89, size=7.0)
 
         # ----------------------------------------------------
         # MOTIF DU CHOMAGE
         # ----------------------------------------------------
-        _draw_multiline(c, 100, 466, data.get("motif_chomage", ""), 7.2, 12, 92)
+        motive = (data.get("motif_chomage", "") or "").strip()
+        if not motive:
+            motive = {
+                "Fin de plein droit et sans préavis": "Fin de l'occupation de plein droit",
+                "Le pouvoir organisateur a mis fin à l'occupation avec préavis": "Fin de l'occupation à l'initiative du pouvoir organisateur avec préavis",
+                "Le pouvoir organisateur a mis fin à l'occupation sans préavis": "Fin de l'occupation à l'initiative du pouvoir organisateur sans préavis",
+                "Le membre du personnel a quitté volontairement son emploi": "Départ volontaire du membre du personnel",
+            }.get(end_reason, "")
+
+        if motive:
+            # Deux lignes pointillées sont prévues sur le formulaire.
+            words = motive.split()
+            lines = []
+            current = ""
+            for word in words:
+                proposal = word if not current else f"{current} {word}"
+                if stringWidth(proposal, "Helvetica", 7.2) <= 452:
+                    current = proposal
+                else:
+                    if current:
+                        lines.append(current)
+                    current = word
+            if current:
+                lines.append(current)
+            for i, line in enumerate(lines[:2]):
+                _draw_clean_value(c, 98 if i == 0 else 29, 468.0 - i * 18.0, line, size=7.2, max_width=455 if i == 0 else 525)
 
         # ----------------------------------------------------
         # DATE / RESPONSABLE
-        # Valeurs placées sous les libellés, mais au-dessus de la barre grise.
         # ----------------------------------------------------
-        _draw_date(c, 46, 361, data.get("declaration_date"), 7.8)
-        _draw_text(c, 227, 361, data.get("responsible_name", ""), 7.8, 70)
+        _draw_clean_date(c, 46, 369.6, data.get("declaration_date"), mask_width=90, size=7.2)
+        # Le formulaire ne prévoit pas de ligne dédiée au nom : on le place juste sous
+        # le libellé, dans l'espace réservé à la signature, sans toucher à la barre grise.
+        _draw_clean_value(c, 228, 356.7, data.get("responsible_name", ""), size=7.0, max_width=275)
 
-    # La page 3 est volontairement laissée vierge : elle est à compléter par l'enseignant.
+    # Page 3 : réservée au membre du personnel, donc laissée intacte.
     return _merge_overlays(template_pdf, {0: page1, 1: page2})
+
 
 def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
     def page1(c):
@@ -2023,11 +2211,31 @@ def render_c4_assistant():
         key="c4_end_reason",
     )
 
+    # Le formulaire comporte une zone libre « Motif du chômage ».
+    # Elle est préremplie à partir du mode de fin choisi, mais reste modifiable.
+    auto_motif = _default_unemployment_reason(end_reason)
+    previous_end_reason = st.session_state.get("c4_previous_end_reason")
+    current_motif = st.session_state.get("c4_motif_chomage", "")
+
+    if previous_end_reason != end_reason:
+        previous_auto = _default_unemployment_reason(previous_end_reason or "")
+        if not current_motif.strip() or current_motif.strip() == previous_auto:
+            st.session_state["c4_motif_chomage"] = auto_motif
+        st.session_state["c4_previous_end_reason"] = end_reason
+
     motif_chomage = st.text_area(
-        "Motif du chômage / remarque à reprendre si nécessaire",
+        "Motif du chômage",
         key="c4_motif_chomage",
         height=80,
+        help=(
+            "Le motif est proposé automatiquement selon le mode de fin de l'occupation. "
+            "Vous pouvez le modifier avant de générer le C4."
+        ),
     )
+
+    # Sécurité : même si le champ a été vidé accidentellement, une valeur cohérente
+    # est reprise pour les quatre motifs standard. Pour « Autre », la saisie reste libre.
+    motif_chomage_pdf = motif_chomage.strip() or auto_motif
 
     # --------------------------------------------------------
     # 7. CONTROLES
@@ -2201,12 +2409,12 @@ def render_c4_assistant():
 
     st.markdown("#### Fin de la dernière occupation")
     st.write(end_text)
-    if motif_chomage.strip():
-        st.write(f"**Motif / remarque :** {motif_chomage.strip()}")
+    if motif_chomage_pdf:
+        st.write(f"**Motif du chômage :** {motif_chomage_pdf}")
 
     summary_lines.append(end_text)
-    if motif_chomage.strip():
-        summary_lines.append(f"Motif / remarque : {motif_chomage.strip()}")
+    if motif_chomage_pdf:
+        summary_lines.append(f"Motif du chômage : {motif_chomage_pdf}")
 
     summary_text = "\n".join(summary_lines)
 
@@ -2325,7 +2533,7 @@ def render_c4_assistant():
         "remarks": "",
         "final_end_date": final_end_date,
         "end_reason": end_reason,
-        "motif_chomage": motif_chomage,
+        "motif_chomage": motif_chomage_pdf,
         "responsible_name": responsible_name,
         "declaration_date": declaration_date,
         "rupture_indemnity": rupture_indemnity,
