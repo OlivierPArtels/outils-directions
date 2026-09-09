@@ -1314,15 +1314,15 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_date(c, 138, 555, data.get("occupation_start"), 7.8)
         _draw_date(c, 385, 555, data.get("service_start"), 7.8)
         _draw_date(c, 146, 533, data.get("occupation_end"), 7.8)
-        _draw_text(c, 293, 533, data.get("worker_code", ""), 7.8, 8)
+        _draw_text(c, 348, 533, data.get("worker_code", ""), 7.8, 8)
         _draw_text(c, 55, 520, data.get("status", ""), 7.8, 30)
-        _draw_text(c, 126, 491, data.get("employment_measure", ""), 7.8, 15)
+        _draw_text(c, 149, 491, data.get("employment_measure", ""), 7.8, 15)
 
         onss_case = data.get("onss_case", "Prélevées")
-        _draw_check(c, 184, 475, onss_case == "Prélevées")
-        _draw_check(c, 365, 475, onss_case == "Non prélevées et non versées")
-        _draw_check(c, 31, 461, onss_case == "Non retenues mais seront versées")
-        _draw_check(c, 226, 461, onss_case == "Statutaire art. 9")
+        _draw_check(c, 163, 475, onss_case == "Prélevées")
+        _draw_check(c, 276, 475, onss_case == "Non prélevées et non versées")
+        _draw_check(c, 27, 462, onss_case == "Non retenues mais seront versées")
+        _draw_check(c, 229, 462, onss_case == "Statutaire art. 9")
 
         _draw_decimal(c, 49, 436, data.get("q"), 2, 8.0)
         _draw_decimal(c, 49, 415, data.get("s"), 2, 8.0)
@@ -1344,27 +1344,27 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
 
         vacation_type = data.get("vacation_type", "Temps partiel")
         if vacation_type == "Temps plein":
-            _draw_check(c, 65, 274, True)
-            _draw_decimal(c, 150, 274, data.get("vacation_amount"), 2, 7.8)
+            _draw_check(c, 63, 263, True)
+            _draw_decimal(c, 167, 263, data.get("vacation_amount"), 2, 7.8)
         else:
-            _draw_check(c, 65, 262, True)
-            _draw_decimal(c, 155, 262, data.get("vacation_amount"), 2, 7.8)
+            _draw_check(c, 63, 251, True)
+            _draw_decimal(c, 172, 251, data.get("vacation_amount"), 2, 7.8)
 
         public_regime = data.get("public_regime", "Non applicable")
-        _draw_check(c, 271, 244, public_regime == "Secteur public")
-        _draw_check(c, 326, 244, public_regime == "Secteur privé")
+        _draw_check(c, 389, 232, public_regime == "Secteur public")
+        _draw_check(c, 451, 232, public_regime == "Secteur privé")
 
         holidays = data.get("paid_holidays_after_end", [])
-        _draw_check(c, 44, 224, len(holidays) == 0)
-        _draw_check(c, 75, 224, len(holidays) > 0)
+        _draw_check(c, 42, 205, len(holidays) == 0)
+        _draw_check(c, 72, 205, len(holidays) > 0)
         for idx, d in enumerate(holidays[:4]):
-            _draw_date(c, 105 + idx * 92, 224, d, 6.8)
+            _draw_date(c, 103 + idx * 92, 205, d, 6.8)
 
         comp_days = float(data.get("comp_rest_days", 0) or 0)
-        _draw_check(c, 203, 180, comp_days <= 0)
-        _draw_check(c, 238, 180, comp_days > 0)
+        _draw_check(c, 243, 172, comp_days <= 0)
+        _draw_check(c, 271, 172, comp_days > 0)
         if comp_days > 0:
-            _draw_decimal(c, 335, 180, comp_days, 2, 7.5)
+            _draw_decimal(c, 358, 172, comp_days, 2, 7.5)
 
     def page2(c):
         _draw_niss(c, 143, 809, data.get("niss", ""))
@@ -1381,14 +1381,14 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
 
         reason = data.get("end_reason", "Durée déterminée arrivée à terme")
         reason_coords = {
-            "Préavis par l'employeur": (37, 627),
-            "Rupture par l'employeur": (37, 574),
-            "Démission / abandon volontaire": (37, 556),
-            "Commun accord": (37, 538),
-            "Force majeure médicale": (37, 520),
-            "Force majeure autre": (37, 502),
-            "Durée déterminée arrivée à terme": (37, 484),
-            "Travail déterminé arrivé à terme": (37, 466),
+            "Préavis par l'employeur": (38, 604),
+            "Rupture par l'employeur": (38, 555),
+            "Démission / abandon volontaire": (38, 539),
+            "Commun accord": (38, 522),
+            "Force majeure médicale": (38, 506),
+            "Force majeure autre": (38, 489),
+            "Durée déterminée arrivée à terme": (38, 473),
+            "Travail déterminé arrivé à terme": (38, 457),
         }
         if reason in reason_coords:
             _draw_check(c, *reason_coords[reason], True)
@@ -1396,15 +1396,15 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         end_date = data.get("occupation_end")
         if reason == "Préavis par l'employeur":
             method = data.get("notice_method", "Lettre recommandée")
-            _draw_check(c, 59, 609, method == "Lettre recommandée")
-            _draw_check(c, 59, 591, method == "Exploit d'huissier")
-            _draw_date(c, 218, 609 if method == "Lettre recommandée" else 591, data.get("notice_sent"), 7.4)
+            _draw_check(c, 59, 588, method == "Lettre recommandée")
+            _draw_check(c, 59, 572, method == "Exploit d'huissier")
+            _draw_date(c, 220, 588 if method == "Lettre recommandée" else 572, data.get("notice_sent"), 7.4)
         elif reason in ("Rupture par l'employeur", "Démission / abandon volontaire", "Commun accord", "Force majeure autre"):
             y = {
-                "Rupture par l'employeur": 574,
-                "Démission / abandon volontaire": 556,
-                "Commun accord": 538,
-                "Force majeure autre": 502,
+                "Rupture par l'employeur": 555,
+                "Démission / abandon volontaire": 539,
+                "Commun accord": 522,
+                "Force majeure autre": 489,
             }[reason]
             _draw_date(c, 170, y, end_date, 7.4)
         elif reason == "Force majeure médicale":
@@ -1414,10 +1414,10 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
 
         indemnity_type = data.get("indemnity_type", "Aucune")
         if indemnity_type == "Salaire pendant le délai de préavis":
-            _draw_check(c, 38, 374, True)
-            _draw_check(c, 69, 350, True)
-            _draw_date(c, 181, 350, data.get("indemnity_start"), 7.2)
-            _draw_date(c, 347, 350, data.get("indemnity_end"), 7.2)
+            _draw_check(c, 32, 358, True)
+            _draw_check(c, 68, 309, True)
+            _draw_date(c, 181, 309, data.get("indemnity_start"), 7.2)
+            _draw_date(c, 347, 309, data.get("indemnity_end"), 7.2)
 
     def page3(c):
         _draw_niss(c, 143, 809, data.get("niss", ""))
@@ -1440,20 +1440,20 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_niss(c, 143, 809, data.get("niss", ""))
         pact = data.get("pact_generations", "Non concerné / ne pas compléter")
         if pact == "Non concerné / ne pas compléter":
-            _draw_check(c, 24, 769, True)
+            _draw_check(c, 27, 765, True)
         elif pact == "Licenciement - cellule emploi créée":
-            _draw_check(c, 60, 728, True)
+            _draw_check(c, 59, 724, True)
         elif pact == "Licenciement - pas de cellule emploi":
-            _draw_check(c, 60, 711, True)
+            _draw_check(c, 59, 713, True)
         elif pact == "Pas un licenciement":
-            _draw_check(c, 60, 694, True)
+            _draw_check(c, 59, 702, True)
 
         complementary = data.get("complementary_indemnity", "Non")
-        _draw_check(c, 60, 654, complementary == "Oui")
-        _draw_check(c, 60, 640, complementary == "Non")
+        _draw_check(c, 59, 666, complementary == "Oui")
+        _draw_check(c, 59, 655, complementary == "Non")
 
         _draw_date(c, 54, 527, data.get("declaration_date"), 7.8)
-        _draw_text(c, 199, 527, data.get("responsible_name", ""), 7.8, 72)
+        # Le nom est placé au-dessus de l’intitulé afin de garder la ligne imprimée lisible.\n        _draw_text(c, 199, 542, data.get("responsible_name", ""), 7.8, 72)
 
     return _merge_overlays(template_pdf, {0: page1, 1: page2, 2: page3, 3: page4})
 
