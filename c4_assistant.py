@@ -650,6 +650,30 @@ def _draw_decimal(c, x: float, y: float, value: Optional[float], decimals: int =
     _draw_text(c, x, y, txt, size=size)
 
 
+def _draw_fraction_number(c, x: float, y: float, value: Optional[float], size: float = 8.0):
+    """Affiche Q/S sans décimales inutiles (4 au lieu de 4,00)."""
+    if value is None:
+        return
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return
+
+    if abs(numeric - round(numeric)) < 1e-9:
+        txt = str(int(round(numeric)))
+    else:
+        txt = f"{numeric:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    _draw_text(c, x, y, txt, size=size)
+
+
+def _draw_form_x(c, x: float, y: float, checked: bool, size: float = 7.0):
+    """Petit X calibré pour rester à l'intérieur des cases du C4-Enseignement."""
+    if not checked:
+        return
+    c.setFont("Helvetica-Bold", size)
+    c.drawString(x, y, "X")
+
+
 def _draw_niss(c, x: float, y: float, niss: str, size: float = 8.2):
     value = re.sub(r"\D", "", niss or "")
     if len(value) == 11:
@@ -665,117 +689,185 @@ def _quarter_parts(label: str) -> tuple[str, str]:
 
 
 def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
+    """
+    Remplit le C4-Enseignement ONEM 06.07.2023/830.10.015.
+
+    Les coordonnées ci-dessous ont été recalibrées sur un PDF réellement généré
+    avec le formulaire officiel afin que les valeurs se placent sur les lignes et
+    que les X restent à l'intérieur des cases.
+    """
     occupations = data.get("occupations", [])
     interruptions = data.get("interruptions", [])
 
-    # Coordonnées en points PDF A4, calibrées sur le modèle ONEM 06.07.2023.
-    occ_y = [576, 428, 280]
+    # Décalage vertical entre les trois cadres d'occupation du formulaire.
+    block_shift = [0.0, 149.4, 298.6]
 
     def page1(c):
-        _draw_niss(c, 93, 723, data.get("niss", ""))
-        _draw_text(c, 252, 723, data.get("employee_name", ""), 8.2, 72)
-        _draw_multiline(c, 88, 697, data.get("employee_address", ""), 8.0, 9.0, 105)
-        _draw_text(c, 168, 670, data.get("establishment_name", ""), 8.0, 88)
-        _draw_multiline(c, 30, 646, data.get("establishment_address", ""), 8.0, 9.0, 110)
-        _draw_text(c, 53, 620, BCE_FWB_ENSEIGNEMENT, 8.2)
+        # ----------------------------------------------------
+        # IDENTITE / ETABLISSEMENT
+        # ----------------------------------------------------
+        _draw_niss(c, 93, 721, data.get("niss", ""), 8.0)
+        _draw_text(c, 252, 721, data.get("employee_name", ""), 8.0, 72)
+        _draw_multiline(c, 88, 695, data.get("employee_address", ""), 7.8, 9.0, 105)
+        _draw_text(c, 168, 668, data.get("establishment_name", ""), 7.8, 88)
+        _draw_multiline(c, 30, 644, data.get("establishment_address", ""), 7.8, 9.0, 110)
+        _draw_text(c, 53, 618, BCE_FWB_ENSEIGNEMENT, 8.0)
 
+        # ----------------------------------------------------
+        # OCCUPATIONS (maximum 3)
+        # ----------------------------------------------------
         for idx, occ in enumerate(occupations[:3]):
-            y = occ_y[idx]
-            _draw_text(c, 34, y, occ.get("fonction", ""), 7.8, 52)
-            _draw_text(c, 34, y - 17, occ.get("statut", ""), 7.8, 48)
-            _draw_decimal(c, 132, y - 31, occ.get("q"), 2, 8.0)
-            _draw_decimal(c, 132, y - 46, occ.get("s"), 2, 8.0)
-            _draw_date(c, 306, y, occ.get("start_date"), 8.0)
-            _draw_date(c, 306, y - 17, occ.get("end_date"), 8.0)
-            _draw_decimal(c, 337, y - 31, occ.get("salary_monthly"), 2, 8.0)
+            d = block_shift[idx]
 
+            # Fonction / statut : commencer après le libellé, sur la ligne pointillée.
+            _draw_text(c, 68, 573 - d, occ.get("fonction", ""), 7.6, 45)
+            _draw_text(c, 68, 557 - d, occ.get("statut", ""), 7.6, 42)
+
+            # Q/S : ne pas imprimer ,00 lorsque la valeur est entière.
+            _draw_fraction_number(c, 132, 542 - d, occ.get("q"), 7.8)
+            _draw_fraction_number(c, 132, 528 - d, occ.get("s"), 7.8)
+
+            # Dates d'occupation.
+            _draw_date(c, 304, 571 - d, occ.get("start_date"), 7.8)
+            _draw_date(c, 304, 555 - d, occ.get("end_date"), 7.8)
+
+            # Salaire mensuel : dans la zone prévue, après le libellé.
+            _draw_decimal(c, 349, 537 - d, occ.get("salary_monthly"), 2, 7.8)
+
+            # Salaire brut exact : uniquement si nécessaire.
             if occ.get("dmfa_state") == "Non / le salaire brut exact doit être complété":
-                _draw_decimal(c, 329, y - 48, occ.get("exact_total"), 2, 8.0)
+                _draw_decimal(c, 329, 521 - d, occ.get("exact_total"), 2, 7.8)
                 qtr, year = _quarter_parts(occ.get("quarter_label", ""))
-                _draw_text(c, 493, y - 48, qtr, 8.0)
-                _draw_text(c, 516, y - 48, year, 8.0)
+                _draw_text(c, 494, 521 - d, qtr, 7.6)
+                _draw_text(c, 516, 521 - d, year, 7.6)
 
+            # Mode de paiement : X au centre des cases 10 / 12 / 20.
             mode = str(occ.get("mode_payment", ""))
-            _draw_check(c, 327, y - 77, mode == "10")
-            _draw_check(c, 352, y - 77, mode == "12")
-            _draw_check(c, 379, y - 77, mode == "20")
+            _draw_form_x(c, 325.2, 488 - d, mode == "10")
+            _draw_form_x(c, 341.5, 488 - d, mode == "12")
+            _draw_form_x(c, 357.9, 488 - d, mode == "20")
 
+            # Cotisations ONSS.
             onss_text = occ.get("onss_text", "") or ""
-            _draw_check(c, 187, y - 94, onss_text.startswith("ont été prélevées") and "du " not in onss_text)
-            if onss_text.startswith("ont été prélevées du"):
-                _draw_check(c, 187, y - 106, True)
-                _draw_date(c, 306, y - 106, occ.get("start_date"), 7.3)
-                _draw_date(c, 438, y - 106, occ.get("end_date"), 7.3)
-            _draw_check(c, 187, y - 119, onss_text.startswith("n'ont pas été prélevées"))
-            _draw_check(c, 187, y - 132, onss_text.startswith("seront versées"))
+            _draw_form_x(
+                c, 186.5, 475 - d,
+                onss_text.startswith("ont été prélevées") and "du " not in onss_text,
+            )
 
+            if onss_text.startswith("ont été prélevées du"):
+                _draw_form_x(c, 186.5, 465 - d, True)
+                # Les dates commencent immédiatement après "du" et "au".
+                _draw_date(c, 253, 465 - d, occ.get("start_date"), 7.0)
+                _draw_date(c, 350, 465 - d, occ.get("end_date"), 7.0)
+
+            _draw_form_x(
+                c, 186.5, 456 - d,
+                onss_text.startswith("n'ont pas été prélevées"),
+            )
+            _draw_form_x(
+                c, 186.5, 446 - d,
+                onss_text.startswith("seront versées"),
+            )
+
+        # ----------------------------------------------------
+        # INTERRUPTIONS
+        # ----------------------------------------------------
         if interruptions:
-            _draw_check(c, 129, 98, True)  # avec interruption
+            _draw_form_x(c, 128.2, 95, True)  # avec interruption
             for row in interruptions[:2]:
                 if row.get("kind") == "Protection de la maternité":
-                    _draw_check(c, 205, 98, True)
-                    _draw_date(c, 339, 98, row.get("start"), 7.3)
-                    _draw_date(c, 464, 98, row.get("end"), 7.3)
+                    _draw_form_x(c, 203.8, 95, True)
+                    _draw_date(c, 329, 95, row.get("start"), 6.8)
+                    _draw_date(c, 434, 95, row.get("end"), 6.8)
                 else:
-                    _draw_check(c, 205, 83, True)
-                    _draw_date(c, 339, 83, row.get("start"), 7.3)
-                    _draw_date(c, 464, 83, row.get("end"), 7.3)
-                    _draw_text(c, 327, 70, row.get("nature", ""), 7.0, 62)
+                    _draw_form_x(c, 203.8, 83, True)
+                    _draw_date(c, 329, 83, row.get("start"), 6.8)
+                    _draw_date(c, 434, 83, row.get("end"), 6.8)
+                    _draw_text(c, 394, 69, row.get("nature", ""), 6.8, 55)
         else:
-            _draw_check(c, 35, 98, True)  # sans interruption
+            _draw_form_x(c, 35.0, 95, True)  # sans interruption
 
-        _draw_text(c, 70, 50, data.get("remarks", ""), 7.2, 120)
+        _draw_text(c, 70, 49, data.get("remarks", ""), 7.0, 120)
 
     def page2(c):
-        _draw_niss(c, 145, 810, data.get("niss", ""))
+        # ----------------------------------------------------
+        # NISS
+        # ----------------------------------------------------
+        _draw_niss(c, 145, 806, data.get("niss", ""), 8.0)
+
         end_date = data.get("final_end_date")
         end_reason = data.get("end_reason", "")
 
+        # ----------------------------------------------------
+        # FIN DE L'OCCUPATION
+        # ----------------------------------------------------
         if end_reason == "Fin de plein droit et sans préavis":
-            _draw_date(c, 221, 768, end_date, 8.0)
+            _draw_date(c, 221, 768, end_date, 7.8)
+
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation avec préavis":
-            _draw_check(c, 31, 720, True)
-            _draw_date(c, 242, 720, end_date, 8.0)
+            _draw_form_x(c, 29.2, 722, True)
+            _draw_date(c, 210, 720, end_date, 7.6)
+
             notice_method = data.get("notice_method", "Lettre recommandée")
-            _draw_check(c, 143, 703, notice_method == "Lettre recommandée")
-            _draw_check(c, 143, 684, notice_method == "Exploit d'huissier")
-            _draw_date(c, 172, 666, data.get("notice_start"), 7.6)
-            _draw_date(c, 298, 666, data.get("notice_end"), 7.6)
+            _draw_form_x(c, 141.8, 704, notice_method == "Lettre recommandée")
+            _draw_form_x(c, 141.8, 686, notice_method == "Exploit d'huissier")
+
+            _draw_date(c, 158, 668, data.get("notice_start"), 7.2)
+            _draw_date(c, 262, 668, data.get("notice_end"), 7.2)
+
             suspended = bool(data.get("notice_suspended"))
-            _draw_check(c, 160, 647, not suspended)
-            _draw_check(c, 252, 647, suspended)
+            _draw_form_x(c, 159.5, 650, not suspended)
+            _draw_form_x(c, 251.5, 650, suspended)
+
             if suspended:
                 suspension_reason = data.get("notice_suspension_reason", "")
-                _draw_check(c, 379, 647, suspension_reason == "Maladie")
-                _draw_check(c, 379, 628, suspension_reason == "Vacances")
-                _draw_check(c, 379, 609, suspension_reason not in ("", "Maladie", "Vacances"))
+                _draw_form_x(c, 377.0, 650, suspension_reason == "Maladie")
+                _draw_form_x(c, 377.2, 632, suspension_reason == "Vacances")
+                _draw_form_x(
+                    c, 377.2, 614,
+                    suspension_reason not in ("", "Maladie", "Vacances"),
+                )
                 if suspension_reason not in ("", "Maladie", "Vacances"):
-                    _draw_text(c, 430, 609, suspension_reason, 7.2, 48)
-                _draw_date(c, 194, 590, data.get("notice_extended_until"), 7.6)
+                    _draw_text(c, 409, 612, suspension_reason, 7.0, 40)
+                _draw_date(c, 189, 596, data.get("notice_extended_until"), 7.2)
+
             transition = bool(data.get("transition"))
-            _draw_check(c, 82, 571, not transition)
-            _draw_check(c, 112, 571, transition)
+            _draw_form_x(c, 79.0, 562, not transition)
+            _draw_form_x(c, 106.7, 562, transition)
             if transition:
-                _draw_date(c, 143, 571, data.get("transition_start"), 7.4)
-                _draw_date(c, 270, 571, data.get("transition_end"), 7.4)
+                _draw_date(c, 142, 560, data.get("transition_start"), 7.0)
+                _draw_date(c, 246, 560, data.get("transition_end"), 7.0)
+
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation sans préavis":
-            _draw_check(c, 31, 516, True)
-            _draw_date(c, 252, 516, end_date, 8.0)
+            _draw_form_x(c, 29.2, 515, True)
+            _draw_date(c, 253, 514, end_date, 7.6)
+
         elif end_reason == "Le membre du personnel a quitté volontairement son emploi":
-            _draw_check(c, 31, 496, True)
-            _draw_date(c, 245, 496, end_date, 8.0)
+            _draw_form_x(c, 29.2, 497, True)
+            _draw_date(c, 212, 496, end_date, 7.6)
 
+        # ----------------------------------------------------
+        # INDEMNITE DE RUPTURE
+        # ----------------------------------------------------
         if data.get("rupture_indemnity"):
-            _draw_check(c, 31, 741, True)
-            _draw_date(c, 245, 741, data.get("rupture_start"), 7.6)
-            _draw_date(c, 372, 741, data.get("rupture_end"), 7.6)
+            _draw_form_x(c, 29.2, 740, True)
+            _draw_date(c, 249, 738, data.get("rupture_start"), 7.2)
+            _draw_date(c, 356, 738, data.get("rupture_end"), 7.2)
 
-        _draw_multiline(c, 31, 458, data.get("motif_chomage", ""), 7.5, 10, 115)
-        _draw_date(c, 47, 357, data.get("declaration_date"), 8.0)
-        _draw_text(c, 227, 357, data.get("responsible_name", ""), 8.0, 70)
+        # ----------------------------------------------------
+        # MOTIF DU CHOMAGE
+        # ----------------------------------------------------
+        _draw_multiline(c, 100, 466, data.get("motif_chomage", ""), 7.2, 12, 92)
 
+        # ----------------------------------------------------
+        # DATE / RESPONSABLE
+        # Valeurs placées sous les libellés, mais au-dessus de la barre grise.
+        # ----------------------------------------------------
+        _draw_date(c, 46, 361, data.get("declaration_date"), 7.8)
+        _draw_text(c, 227, 361, data.get("responsible_name", ""), 7.8, 70)
+
+    # La page 3 est volontairement laissée vierge : elle est à compléter par l'enseignant.
     return _merge_overlays(template_pdf, {0: page1, 1: page2})
-
 
 def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
     def page1(c):
