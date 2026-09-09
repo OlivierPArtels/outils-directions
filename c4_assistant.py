@@ -1825,6 +1825,107 @@ def render_c4_classique_acs_ape():
     source_entry = entries[labels.index(source_label)]
 
     # --------------------------------------------------------
+    # SYNCHRONISATION DES DONNÉES EXTRAITES
+    # --------------------------------------------------------
+    # Streamlit conserve la valeur des widgets portant une clé identique entre
+    # les reruns. Sans cette synchronisation, un champ ACS/APE déjà créé vide
+    # pouvait rester vide après l'import d'une fiche de paie, même si le PDF
+    # avait été correctement lu. On recharge donc les valeurs détectées chaque
+    # fois que la fiche / page source change, sans écraser les corrections
+    # manuelles lors des reruns suivants.
+    source_signature = "|".join(
+        [
+            source_entry.file_name,
+            str(source_entry.page_number),
+            source_entry.employee_name or "",
+            source_entry.employee_address or "",
+            str(source_entry.q if source_entry.q is not None else ""),
+            str(source_entry.s if source_entry.s is not None else ""),
+            str(source_entry.annual_base_salary if source_entry.annual_base_salary is not None else ""),
+            str(source_entry.pdf_index if source_entry.pdf_index is not None else ""),
+            str(source_entry.gross if source_entry.gross is not None else ""),
+        ]
+    )
+
+    if st.session_state.get("_c4_acs_prefill_signature") != source_signature:
+        st.session_state["_c4_acs_prefill_signature"] = source_signature
+        st.session_state["c4_acs_employee_name"] = source_entry.employee_name or ""
+        st.session_state["c4_acs_employee_address"] = source_entry.employee_address or ""
+
+        detected_q = float(source_entry.q or 0.0)
+        detected_s = float(source_entry.s or 0.0)
+        if abs(detected_q - 18.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+            st.session_state["c4_acs_regime_horaire"] = "Mi-temps — 18/36"
+        elif abs(detected_q - 32.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+            st.session_state["c4_acs_regime_horaire"] = "4/5e temps — 32/36"
+        elif abs(detected_q - 36.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+            st.session_state["c4_acs_regime_horaire"] = "Temps plein — 36/36"
+
+        # Recalcule la rémunération proposée pour la nouvelle fiche.
+        st.session_state.pop("c4_acs_use_auto_salary", None)
+        st.session_state.pop("c4_acs_theoretical_salary_manual", None)
+
+    st.success("La fiche de paie a été lue et les données disponibles ont été récupérées.")
+    info1, info2, info3 = st.columns(3)
+    with info1:
+        st.markdown(f"**Nom :** {source_entry.employee_name or '—'}")
+        if source_entry.employee_address:
+            st.markdown(
+                "**Adresse détectée :** "
+                + re.sub(r"\s+", " ", source_entry.employee_address).strip()
+            )
+        if source_entry.q is not None and source_entry.s is not None:
+            st.markdown(
+                "**Charge détectée :** "
+                + f"{source_entry.q:.2f}/{source_entry.s:.2f}".replace(".", ",")
+            )
+        else:
+            st.markdown("**Charge détectée :** —")
+    with info2:
+        st.markdown(f"**TAB :** {_format_money(source_entry.annual_base_salary)}")
+        st.markdown(
+            "**Index :** "
+            + (
+                f"{source_entry.pdf_index:.4f}".replace(".", ",")
+                if source_entry.pdf_index is not None
+                else "—"
+            )
+        )
+    with info3:
+        st.markdown(f"**Brut payé :** {_format_money(source_entry.gross)}")
+        if source_entry.establishment_name:
+            st.markdown(
+                f"**Établissement détecté sur la fiche :** {source_entry.establishment_name}"
+            )
+        if source_entry.period_start and source_entry.period_end:
+            st.markdown(
+                f"**Période de paie :** {_format_date(source_entry.period_start)} → "
+                f"{_format_date(source_entry.period_end)}"
+            )
+        else:
+            st.markdown("**Période de paie :** —")
+
+    missing_auto = []
+    if not source_entry.employee_name:
+        missing_auto.append("nom")
+    if not source_entry.employee_address:
+        missing_auto.append("adresse")
+    if source_entry.q is None or source_entry.s is None:
+        missing_auto.append("charge")
+    if source_entry.annual_base_salary is None:
+        missing_auto.append("TAB")
+    if source_entry.pdf_index is None:
+        missing_auto.append("index")
+    if source_entry.gross is None:
+        missing_auto.append("brut")
+    if missing_auto:
+        st.warning(
+            "Certaines données n'ont pas été reconnues automatiquement sur cette fiche : "
+            + ", ".join(missing_auto)
+            + ". Les autres données détectées restent utilisables."
+        )
+
+    # --------------------------------------------------------
     # 3. TYPE DE PROGRAMME
     # --------------------------------------------------------
     st.subheader("3. Situation ACS / APE")
@@ -1842,10 +1943,20 @@ def render_c4_classique_acs_ape():
 
     programme_options = ["ACS", "APE", "PART-APE", "PTP"]
     programme_index = programme_options.index(detected_program) if detected_program in programme_options else 0
+
+    # Si le programme est explicitement présent sur la fiche, on le reprend
+    # automatiquement lors du changement de source. Sinon, le choix reste manuel.
+    programme_signature = f"{source_signature}|{detected_program}"
+    if st.session_state.get("_c4_acs_programme_signature") != programme_signature:
+        st.session_state["_c4_acs_programme_signature"] = programme_signature
+        if detected_program in programme_options:
+            st.session_state["c4_acs_programme"] = detected_program
+        elif "c4_acs_programme" not in st.session_state:
+            st.session_state["c4_acs_programme"] = programme_options[programme_index]
+
     programme = st.selectbox(
         "Type de programme",
         programme_options,
-        index=programme_index,
         key="c4_acs_programme",
     )
 
@@ -1889,7 +2000,6 @@ def render_c4_classique_acs_ape():
     with col1:
         employee_name = st.text_input(
             "Nom et prénom",
-            value=source_entry.employee_name,
             key="c4_acs_employee_name",
         )
         niss = st.text_input(
@@ -1899,7 +2009,6 @@ def render_c4_classique_acs_ape():
         )
         employee_address = st.text_area(
             "Adresse du membre du personnel (contrôle)",
-            value=source_entry.employee_address,
             key="c4_acs_employee_address",
             height=85,
             disabled=True,
@@ -2043,10 +2152,13 @@ def render_c4_classique_acs_ape():
     if fonction_acs == "Puériculteur(trice) PTP":
         default_regime_index = 1
 
+    regime_options = list(REGIMES_HORAIRES_ACS_APE.keys())
+    if "c4_acs_regime_horaire" not in st.session_state:
+        st.session_state["c4_acs_regime_horaire"] = regime_options[default_regime_index]
+
     regime_horaire = st.selectbox(
         "Charge horaire",
-        options=list(REGIMES_HORAIRES_ACS_APE.keys()),
-        index=default_regime_index,
+        options=regime_options,
         key="c4_acs_regime_horaire",
         help=(
             "Choisissez le régime de travail. Le site convertit automatiquement ce choix "
