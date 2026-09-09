@@ -800,7 +800,7 @@ def _draw_decimal(c, x: float, y: float, value: Optional[float], decimals: int =
 
 
 def _draw_fraction_number(c, x: float, y: float, value: Optional[float], size: float = 8.0):
-    """Affiche Q/S sans décimales inutiles (4 au lieu de 4,00)."""
+    """Affiche Q/S avec deux décimales, conformément au format du formulaire."""
     if value is None:
         return
     try:
@@ -808,10 +808,7 @@ def _draw_fraction_number(c, x: float, y: float, value: Optional[float], size: f
     except (TypeError, ValueError):
         return
 
-    if abs(numeric - round(numeric)) < 1e-9:
-        txt = str(int(round(numeric)))
-    else:
-        txt = f"{numeric:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    txt = f"{numeric:.2f}".replace(".", ",")
     _draw_text(c, x, y, txt, size=size)
 
 
@@ -877,7 +874,12 @@ def _draw_clean_value(
     """
     if text is None:
         return
-    value = str(text).strip()
+    # Les champs de cette fonction sont des champs sur une seule ligne.
+    # On remplace donc les retours à la ligne, tabulations et espaces insécables
+    # par un espace normal. Cela évite notamment le carré noir qui apparaissait
+    # entre le numéro de maison et le code postal dans l'adresse du MDP.
+    value = str(text).replace("\u00a0", " ")
+    value = re.sub(r"\s+", " ", value).strip()
     if not value:
         return
 
@@ -934,16 +936,15 @@ def _draw_box_x(c, left: float, bottom: float, width: float = 6.5, height: float
 
 
 def _draw_clean_fraction(c, x: float, y: float, value: Optional[float], field_width: float = 65.0, size: float = 7.6):
+    """Affiche toujours la fraction avec deux décimales : 4,00 / 24,00."""
     if value is None:
         return
     try:
         numeric = float(value)
     except (TypeError, ValueError):
         return
-    if abs(numeric - round(numeric)) < 1e-9:
-        txt = str(int(round(numeric)))
-    else:
-        txt = f"{numeric:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+    txt = f"{numeric:.2f}".replace(".", ",")
     _mask_pdf_area(c, x - 1.0, y - 1.8, field_width, size + 3.1)
     c.setFillColorRGB(0, 0, 0)
     c.setFont("Helvetica", size)
@@ -999,9 +1000,9 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
 
         _draw_clean_value(c, 91, 721.0, niss, size=7.7, max_width=96, mask_width=98)
         _draw_clean_value(c, 252, 721.0, data.get("employee_name", ""), size=7.7, max_width=285)
-        _draw_clean_value(c, 88, 695.0, data.get("employee_address", ""), size=7.4, max_width=455)
-        _draw_clean_value(c, 168, 668.0, data.get("establishment_name", ""), size=7.5, max_width=380)
-        _draw_clean_value(c, 30, 644.0, data.get("establishment_address", ""), size=7.4, max_width=520)
+        _draw_clean_value(c, 88, 694.4, data.get("employee_address", ""), size=7.35, max_width=455)
+        _draw_clean_value(c, 168, 668.2, data.get("establishment_name", ""), size=7.45, max_width=380)
+        _draw_clean_value(c, 30, 643.6, data.get("establishment_address", ""), size=7.35, max_width=520)
         _draw_clean_value(c, 52, 618.0, BCE_FWB_ENSEIGNEMENT, size=7.7, max_width=95, mask_width=102)
 
         # ----------------------------------------------------
@@ -1014,8 +1015,8 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
             _draw_clean_value(c, 55, lay["status_y"], occ.get("statut", ""), size=7.35, max_width=180)
 
             # On masque toute la zone Q/S afin de supprimer les virgules et tirets préimprimés.
-            _draw_clean_fraction(c, 132, lay["q_y"], occ.get("q"), field_width=66, size=7.6)
-            _draw_clean_fraction(c, 132, lay["s_y"], occ.get("s"), field_width=66, size=7.6)
+            _draw_clean_fraction(c, 132.5, lay["q_y"], occ.get("q"), field_width=70, size=7.45)
+            _draw_clean_fraction(c, 132.5, lay["s_y"], occ.get("s"), field_width=70, size=7.45)
 
             _draw_clean_date(c, 304, lay["entry_y"], occ.get("start_date"), mask_width=92, size=7.45)
             _draw_clean_date(c, 304, lay["end_y"], occ.get("end_date"), mask_width=92, size=7.45)
@@ -1177,9 +1178,10 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
         # DATE / RESPONSABLE
         # ----------------------------------------------------
         _draw_clean_date(c, 46, 369.6, data.get("declaration_date"), mask_width=90, size=7.2)
-        # Le formulaire ne prévoit pas de ligne dédiée au nom : on le place juste sous
-        # le libellé, dans l'espace réservé à la signature, sans toucher à la barre grise.
-        _draw_clean_value(c, 228, 356.7, data.get("responsible_name", ""), size=7.0, max_width=275)
+        # Le nom du responsable doit apparaître dans l'espace de signature AU-DESSUS
+        # du libellé imprimé "nom et signature du responsable...".
+        # Il reste suffisamment d'espace pour apposer la signature manuscrite.
+        _draw_clean_value(c, 228, 386.0, data.get("responsible_name", ""), size=7.0, max_width=285)
 
     # Page 3 : réservée au membre du personnel, donc laissée intacte.
     return _merge_overlays(template_pdf, {0: page1, 1: page2})
@@ -2489,7 +2491,9 @@ def render_c4_assistant():
         st.write(f"**Statut :** {occ['statut']}")
         st.write(f"**Date d'entrée :** {_format_date(occ['start_date']) or 'À compléter'}")
         st.write(f"**Date de fin :** {_format_date(occ['end_date']) or 'À compléter'}")
-        st.write(f"**Fraction de charge :** Q {occ['q']:g} / S {occ['s']:g}")
+        st.write(
+            f"**Fraction de charge :** Q {occ['q']:.2f} / S {occ['s']:.2f}".replace('.', ',')
+        )
         st.write(
             "**Index repris sur la fiche :** "
             + (f"{occ['index_value']:.4f}".replace(".", ",") if occ['index_value'] is not None else "non détecté")
