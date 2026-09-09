@@ -103,155 +103,54 @@ def _format_fonction_option(code: str) -> str:
 # CHAMP DATE AVEC / AUTOMATIQUES
 # ============================================================
 
-C4_DATE_INPUT_HTML = """
-<div class="c4-date-widget">
-    <label class="c4-date-label"></label>
-    <input
-        class="c4-date-input"
-        type="text"
-        inputmode="numeric"
-        maxlength="10"
-        placeholder="JJ/MM/AAAA"
-        autocomplete="off"
-    />
-</div>
-"""
+def _format_masked_date(value: str) -> str:
+    """Transforme 25082025 en 25/08/2025 sans composant Streamlit v2."""
+    digits = re.sub(r"\D", "", value or "")[:8]
 
-C4_DATE_INPUT_CSS = """
-.c4-date-widget {
-    width: 100%;
-    font-family: var(--st-font);
-}
+    if len(digits) <= 2:
+        return digits
+    if len(digits) <= 4:
+        return f"{digits[:2]}/{digits[2:]}"
+    return f"{digits[:2]}/{digits[2:4]}/{digits[4:]}"
 
-.c4-date-label {
-    display: block;
-    margin-bottom: 0.4rem;
-    font-size: 0.875rem;
-    color: var(--st-text-color);
-}
 
-.c4-date-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 0.55rem 0.75rem;
-    font-family: var(--st-font);
-    font-size: 1rem;
-    color: var(--st-text-color);
-    background-color: var(--st-secondary-background-color);
-    border: 1px solid rgba(128, 128, 128, 0.5);
-    border-radius: 0.5rem;
-    outline: none;
-}
-
-.c4-date-input:focus {
-    border-color: var(--st-primary-color);
-    box-shadow: 0 0 0 1px var(--st-primary-color);
-}
-
-.c4-date-input::placeholder {
-    opacity: 0.6;
-}
-"""
-
-C4_DATE_INPUT_JS = r"""
-export default function({
-    parentElement,
-    data,
-    setTriggerValue
-}) {
-    const label = parentElement.querySelector('.c4-date-label');
-    const input = parentElement.querySelector('.c4-date-input');
-
-    if (!label || !input) {
-        return;
-    }
-
-    label.textContent = data?.label ?? 'Date';
-
-    function formatDate(value) {
-        const digits = (value ?? '')
-            .replace(/\D/g, '')
-            .slice(0, 8);
-
-        if (digits.length <= 2) {
-            return digits;
-        }
-
-        if (digits.length <= 4) {
-            return digits.slice(0, 2) + '/' + digits.slice(2);
-        }
-
-        return (
-            digits.slice(0, 2)
-            + '/'
-            + digits.slice(2, 4)
-            + '/'
-            + digits.slice(4)
-        );
-    }
-
-    if (!input.dataset.initialized) {
-        input.value = formatDate(data?.value ?? '');
-        input.dataset.initialized = 'true';
-    }
-
-    input.oninput = function() {
-        input.value = formatDate(input.value);
-    };
-
-    function commitDate() {
-        setTriggerValue('submitted_date', input.value);
-    }
-
-    input.onblur = function() {
-        commitDate();
-    };
-
-    input.onkeydown = function(event) {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            commitDate();
-        }
-    };
-
-    return () => {
-        input.oninput = null;
-        input.onblur = null;
-        input.onkeydown = null;
-    };
-}
-"""
-
-C4_DATE_INPUT_COMPONENT = st.components.v2.component(
-    name="c4_date_masked",
-    html=C4_DATE_INPUT_HTML,
-    css=C4_DATE_INPUT_CSS,
-    js=C4_DATE_INPUT_JS,
-)
+def _sync_masked_date(widget_key: str, state_key: str) -> None:
+    """Normalise la date quand l'utilisateur valide le champ ou le quitte."""
+    formatted = _format_masked_date(st.session_state.get(widget_key, ""))
+    st.session_state[widget_key] = formatted
+    st.session_state[state_key] = formatted
 
 
 def _masked_date_input(label: str, key: str, value: str = "") -> str:
-    """Champ texte JJ/MM/AAAA avec insertion automatique des barres obliques."""
+    """Champ JJ/MM/AAAA robuste, sans st.components.v2.
+
+    Les barres obliques sont ajoutées automatiquement dès que le champ est
+    validé (Entrée) ou quitté. Cette solution évite l'erreur
+    BidiComponentInvalidIdError rencontrée sur Streamlit Cloud.
+    """
     state_key = f"{key}__masked_value"
+    widget_key = f"{key}__input"
 
     if state_key not in st.session_state:
-        st.session_state[state_key] = value or ""
+        st.session_state[state_key] = _format_masked_date(value or "")
 
-    result = C4_DATE_INPUT_COMPONENT(
-        data={
-            "label": label,
-            "value": st.session_state[state_key],
-        },
-        on_submitted_date_change=lambda: None,
-        key=f"{key}__component",
-        width="stretch",
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = st.session_state[state_key]
+
+    st.text_input(
+        label,
+        key=widget_key,
+        placeholder="JJ/MM/AAAA",
+        max_chars=10,
+        on_change=_sync_masked_date,
+        args=(widget_key, state_key),
     )
 
-    submitted = getattr(result, "submitted_date", None)
-    if submitted is not None:
-        st.session_state[state_key] = str(submitted).strip()
-
-    return str(st.session_state[state_key]).strip()
+    # Si la valeur a été modifiée autrement dans l'état de session, on garde
+    # toujours une version normalisée pour les calculs.
+    current = _format_masked_date(st.session_state.get(widget_key, ""))
+    st.session_state[state_key] = current
+    return current
 
 
 # ============================================================
