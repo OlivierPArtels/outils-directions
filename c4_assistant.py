@@ -49,7 +49,7 @@ EXPECTED_C4_CLASSIQUE_VERSION = "06.07.2023/830.10.016"
 # Liste reprise de ProEco à partir des fonctions communiquées.
 # Le code est affiché dans le menu pour faciliter le choix, mais seul
 # l’intitulé complet est imprimé sur le C4.
-# KI — Kinésithérapeute est volontairement exclu.
+# La liste inclut les fonctions supplémentaires communiquées pour le module C4.
 FONCTIONS_ENSEIGNEMENT: list[tuple[str, str]] = [
     ("DIM", "Directeur d'école maternelle"),
     ("DIF", "Directeur d'école fondamentale"),
@@ -113,6 +113,43 @@ FONCTIONS_ENSEIGNEMENT: list[tuple[str, str]] = [
 ]
 
 FONCTIONS_PAR_CODE = dict(FONCTIONS_ENSEIGNEMENT)
+
+
+# ============================================================
+# FONCTIONS PRIORITAIRES ACS / APE / PART-APE / PTP
+# ============================================================
+
+# Ces fonctions sont volontairement placées en tête du menu ACS/APE.
+# Les autres fonctions ProEco restent disponibles ensuite.
+FONCTIONS_ACS_APE_PRIORITAIRES: list[str] = [
+    "Assistant(e) à l’instituteur(trice) maternel(le)",
+    "Assistant(e) à l’instituteur(trice) primaire",
+    "Assistant(e) à la gestion administrative",
+    "Assistant(e) au personnel auxiliaire d'éducation",
+    "Ouvrier(ère)",
+    "Puériculteur(trice) PTP",
+]
+
+FONCTIONS_ACS_APE_OPTIONS: list[str] = (
+    FONCTIONS_ACS_APE_PRIORITAIRES
+    + [f"{code} — {label}" for code, label in FONCTIONS_ENSEIGNEMENT]
+)
+
+# Régimes horaires autorisés pour les situations ACS / APE / PART-APE / PTP.
+# Le libellé est affiché à l'utilisateur ; Q et S restent calculés en interne
+# car le formulaire C4 classique les attend.
+REGIMES_HORAIRES_ACS_APE: dict[str, tuple[float, float]] = {
+    "Mi-temps — 18/36": (18.0, 36.0),
+    "4/5e temps — 32/36": (32.0, 36.0),
+    "Temps plein — 36/36": (36.0, 36.0),
+}
+
+
+def _acs_ape_function_label(option: str) -> str:
+    """Retourne l'intitulé de fonction sans le code ProEco éventuel."""
+    if " — " in option:
+        return option.split(" — ", 1)[1].strip()
+    return option.strip()
 
 
 def _format_fonction_option(code: str) -> str:
@@ -1425,7 +1462,7 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
 # INTERFACE C4 CLASSIQUE
 # ============================================================
 
-def render_c4_classique():
+def render_c4_classique_manuel():
     st.subheader("2. Fiche(s) de paie")
     uploaded_files = st.file_uploader(
         "Importer une ou plusieurs fiches de paie PDF",
@@ -1704,6 +1741,823 @@ def render_c4_classique():
 
 
 # ============================================================
+# INTERFACE C4 CLASSIQUE - ACS / APE / PART-APE / PTP
+# ============================================================
+
+def render_c4_classique_acs_ape():
+    """Prépare automatiquement le C4 classique à partir des mêmes fiches FWB.
+
+    Les éléments fiables de la fiche de paie sont repris automatiquement : identité,
+    Q/S, barème annuel, index, brut et éventuelle allocation foyer/résidence.
+    Les données qui ne figurent pas de manière fiable sur la fiche (NISS, dates
+    contractuelles, données du PO, code travailleur, vacances et motif de fin) restent
+    à confirmer par la direction.
+    """
+
+    st.info(
+        "Les situations ACS / APE / PART-APE / PTP utilisent le C4 classique. "
+        "Vous pouvez importer les mêmes fiches de paie PDF que pour le C4-Enseignement."
+    )
+
+    # --------------------------------------------------------
+    # 2. FICHES DE PAIE
+    # --------------------------------------------------------
+    st.subheader("2. Fiches de paie")
+
+    uploaded_files = st.file_uploader(
+        "Importer une ou plusieurs fiches de paie PDF",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="c4_acs_payroll_files",
+    )
+
+    st.caption(
+        "Le module lit les PDF pour effectuer les calculs mais ne les enregistre pas dans GitHub."
+    )
+
+    if not uploaded_files:
+        st.info("Importez au moins une fiche de paie pour préremplir automatiquement le C4.")
+        return
+
+    entries, extraction_errors = extract_payroll_entries(uploaded_files)
+    for error in extraction_errors:
+        st.warning(error)
+
+    if not entries:
+        st.error("Aucune donnée exploitable n'a pu être extraite des fiches de paie.")
+        return
+
+    with st.expander("Voir les données détectées sur les fiches de paie"):
+        rows = []
+        for entry in entries:
+            rows.append(
+                {
+                    "Source": f"{entry.file_name} – p. {entry.page_number}",
+                    "Nom": entry.employee_name,
+                    "Q/S": (
+                        f"{entry.q:.2f}/{entry.s:.2f}".replace(".", ",")
+                        if entry.q is not None and entry.s is not None
+                        else "—"
+                    ),
+                    "Statut fiche": entry.status or "—",
+                    "TAB": _format_money(entry.annual_base_salary),
+                    "Index": (
+                        f"{entry.pdf_index:.4f}".replace(".", ",")
+                        if entry.pdf_index is not None
+                        else "—"
+                    ),
+                    "Brut payé": _format_money(entry.gross),
+                    "Période de paie": (
+                        f"{_format_date(entry.period_start)} → {_format_date(entry.period_end)}"
+                        if entry.period_start and entry.period_end
+                        else "—"
+                    ),
+                }
+            )
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    labels = [_entry_label(entry) for entry in entries]
+    source_label = st.selectbox(
+        "Quelle ligne de la fiche correspond à l'occupation qui prend fin ?",
+        labels,
+        key="c4_acs_source_entry",
+    )
+    source_entry = entries[labels.index(source_label)]
+
+    # --------------------------------------------------------
+    # 3. TYPE DE PROGRAMME
+    # --------------------------------------------------------
+    st.subheader("3. Situation ACS / APE")
+
+    detected_program = ""
+    all_text = "\n".join(entry.raw_text.upper() for entry in entries)
+    if "PART-APE" in all_text or "PART APE" in all_text:
+        detected_program = "PART-APE"
+    elif re.search(r"\bPTP\b", all_text):
+        detected_program = "PTP"
+    elif re.search(r"\bACS\b", all_text):
+        detected_program = "ACS"
+    elif re.search(r"\bAPE\b", all_text):
+        detected_program = "APE"
+
+    programme_options = ["ACS", "APE", "PART-APE", "PTP"]
+    programme_index = programme_options.index(detected_program) if detected_program in programme_options else 0
+    programme = st.selectbox(
+        "Type de programme",
+        programme_options,
+        index=programme_index,
+        key="c4_acs_programme",
+    )
+
+    fonction_option = st.selectbox(
+        "Fonction",
+        options=FONCTIONS_ACS_APE_OPTIONS,
+        key="c4_acs_fonction",
+        help=(
+            "Les fonctions propres aux situations ACS/APE/PTP sont placées en tête de liste. "
+            "Les autres fonctions ProEco apparaissent ensuite."
+        ),
+    )
+    fonction_acs = _acs_ape_function_label(fonction_option)
+
+    if fonction_acs == "Puériculteur(trice) PTP":
+        st.info(
+            "Puériculteur(trice) PTP : cette fonction requiert un titre requis ou suffisant "
+            "et impose une charge horaire de 32/36e."
+        )
+        if programme != "PTP":
+            st.warning(
+                "La fonction « Puériculteur(trice) PTP » doit être utilisée avec le programme PTP."
+            )
+
+    if programme == "PTP":
+        employment_measure = "2"
+        st.caption("Mesure de promotion de l'emploi : code 2 (PTP), complété automatiquement.")
+    else:
+        employment_measure = ""
+        st.caption(
+            "Pour ACS / APE / PART-APE, le champ « mesure de promotion de l'emploi » du C4 "
+            "reste vide. Le code 2 est réservé au PTP/SINE."
+        )
+
+    # --------------------------------------------------------
+    # 4. TRAVAILLEUR / ETABLISSEMENT / EMPLOYEUR
+    # --------------------------------------------------------
+    st.subheader("4. Travailleur et employeur")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        employee_name = st.text_input(
+            "Nom et prénom",
+            value=source_entry.employee_name,
+            key="c4_acs_employee_name",
+        )
+        niss = st.text_input(
+            "NISS",
+            key="c4_acs_niss",
+            help="Le matricule figurant sur la fiche de paie n'est pas utilisé comme NISS.",
+        )
+        employee_address = st.text_area(
+            "Adresse du membre du personnel (contrôle)",
+            value=source_entry.employee_address,
+            key="c4_acs_employee_address",
+            height=85,
+            disabled=True,
+        )
+
+    with col2:
+        fase_database, fase_database_error = _load_fase_database()
+        fase_input = st.text_input(
+            "N° FASE de l'établissement",
+            placeholder="Ex. 765",
+            key="c4_acs_fase",
+        )
+        fase = _normalize_fase(fase_input)
+        fase_record = fase_database.get(fase) if fase else None
+
+        establishment_name = ""
+        establishment_address = ""
+        establishment_unit_bce = ""
+
+        if fase_database_error:
+            st.error(fase_database_error)
+        elif not fase:
+            st.caption("Introduisez le FASE pour identifier l'établissement officiel.")
+        elif not fase_record:
+            st.error(f"Le numéro FASE {fase} n'a pas été trouvé dans le répertoire FWB.")
+        else:
+            establishment_name = str(fase_record.get("nom", "")).strip()
+            establishment_address = _fase_establishment_address(fase_record)
+            establishment_unit_bce = str(fase_record.get("bce_etablissement", "")).strip()
+            st.markdown(f"**Établissement :** {establishment_name}")
+            st.markdown(f"**Adresse :** {establishment_address}")
+            if establishment_unit_bce:
+                st.caption(
+                    f"N° BCE de l'unité d'établissement : {establishment_unit_bce} — "
+                    "informatif, ce n'est pas automatiquement le n° d'entreprise de l'employeur/PO."
+                )
+
+    st.warning(
+        "Le C4 classique doit identifier l'employeur. Le FASE permet d'identifier l'école, "
+        "mais pas de manière fiable le pouvoir organisateur ni son numéro d'entreprise. "
+        "Ces données doivent donc être confirmées ci-dessous."
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        employer_name = st.text_input(
+            "Nom / raison sociale du pouvoir organisateur",
+            key="c4_acs_employer_name",
+        )
+        employer_address = st.text_area(
+            "Adresse du pouvoir organisateur",
+            key="c4_acs_employer_address",
+            height=85,
+        )
+        enterprise_number = st.text_input(
+            "Numéro d'entreprise (BCE) du pouvoir organisateur",
+            key="c4_acs_bce",
+        )
+    with c2:
+        employer_category = st.text_input(
+            "Catégorie employeur",
+            key="c4_acs_employer_category",
+        )
+        joint_committee = st.text_input(
+            "Commission paritaire",
+            key="c4_acs_joint_committee",
+        )
+        onss_number = st.text_input(
+            "Numéro ONSS de l'employeur",
+            key="c4_acs_onss_number",
+        )
+
+    # --------------------------------------------------------
+    # 5. OCCUPATION
+    # --------------------------------------------------------
+    st.subheader("5. Données concernant l'occupation")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        occupation_start_txt = _masked_date_input(
+            "Date de début de l'occupation",
+            key="c4_acs_occ_start",
+        )
+        service_start_txt = _masked_date_input(
+            "Date d'entrée en service",
+            key="c4_acs_service_start",
+        )
+    with c2:
+        occupation_end_txt = _masked_date_input(
+            "Date de fin de l'occupation",
+            key="c4_acs_occ_end",
+        )
+        worker_code = st.text_input(
+            "Code travailleur (3 chiffres)",
+            max_chars=3,
+            key="c4_acs_worker_code",
+        )
+    with c3:
+        home_worker = st.checkbox(
+            "Travailleur à domicile",
+            value=False,
+            key="c4_acs_home_worker",
+            help="Le statut D ne doit être indiqué sur le C4 que pour un travailleur à domicile.",
+        )
+        status = "D" if home_worker else ""
+        st.text_input(
+            "Statut à reporter",
+            value=status,
+            disabled=True,
+            key="c4_acs_status_display",
+        )
+        st.text_input(
+            "Mesure de promotion de l'emploi",
+            value=employment_measure,
+            disabled=True,
+            key="c4_acs_employment_measure_display",
+        )
+
+    occupation_start, e1 = _parse_user_date(occupation_start_txt)
+    service_start, e2 = _parse_user_date(service_start_txt)
+    occupation_end, e3 = _parse_user_date(occupation_end_txt)
+
+    # --------------------------------------------------------
+    # REGIME HORAIRE
+    # --------------------------------------------------------
+    # Pour les situations ACS / APE / PART-APE / PTP, l'utilisateur ne doit
+    # pas encoder Q et S séparément. Il choisit le régime, puis Q/S sont
+    # déterminés automatiquement pour le C4 classique.
+    detected_q = float(source_entry.q or 0.0)
+    detected_s = float(source_entry.s or 0.0)
+
+    default_regime_index = 2  # Temps plein par défaut
+    if abs(detected_q - 18.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+        default_regime_index = 0
+    elif abs(detected_q - 32.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+        default_regime_index = 1
+    elif abs(detected_q - 36.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+        default_regime_index = 2
+
+    # La fonction Puériculteur(trice) PTP impose 32/36e.
+    if fonction_acs == "Puériculteur(trice) PTP":
+        default_regime_index = 1
+
+    regime_horaire = st.selectbox(
+        "Charge horaire",
+        options=list(REGIMES_HORAIRES_ACS_APE.keys()),
+        index=default_regime_index,
+        key="c4_acs_regime_horaire",
+        help=(
+            "Choisissez le régime de travail. Le site convertit automatiquement ce choix "
+            "en Q/S pour remplir le C4 classique."
+        ),
+    )
+
+    q, s = REGIMES_HORAIRES_ACS_APE[regime_horaire]
+
+    st.caption(
+        f"Valeur reportée automatiquement sur le C4 : Q = {q:.2f} / S = {s:.2f}".replace(".", ",")
+    )
+
+    onss_case = st.selectbox(
+        "Cotisations ONSS - secteur chômage",
+        [
+            "Prélevées",
+            "Non prélevées et non versées",
+            "Non retenues mais seront versées",
+            "Statutaire art. 9",
+        ],
+        index=0,
+        key="c4_acs_onss_case",
+    )
+
+    # --------------------------------------------------------
+    # 6. REMUNERATION - CALCUL AUTOMATIQUE
+    # --------------------------------------------------------
+    st.subheader("6. Rémunération")
+
+    monthly_fr = reconstruct_monthly_fr(source_entry)
+    calculated_theoretical = None
+    if (
+        source_entry.annual_base_salary is not None
+        and source_entry.pdf_index is not None
+        and q > 0
+        and s > 0
+    ):
+        calculated_theoretical = calculate_monthly_indexed_salary(
+            annual_base_salary=source_entry.annual_base_salary,
+            q=q,
+            s=s,
+            index_value=source_entry.pdf_index,
+            monthly_fr=monthly_fr,
+        )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("TAB détecté", _format_money(source_entry.annual_base_salary))
+    with c2:
+        st.metric(
+            "Index détecté",
+            f"{source_entry.pdf_index:.4f}".replace(".", ",") if source_entry.pdf_index else "—",
+        )
+    with c3:
+        st.metric("Allocation F/R mensuelle", _format_money(monthly_fr))
+
+    if calculated_theoretical is not None:
+        st.success(
+            "Salaire brut moyen théorique calculé automatiquement : "
+            f"{_format_money(calculated_theoretical)} / mois"
+        )
+        st.caption("Calcul : TAB × Q/S × index ÷ 12 + allocation foyer/résidence éventuelle.")
+    else:
+        st.warning(
+            "Le TAB, l'index ou la fraction Q/S n'a pas pu être déterminé complètement. "
+            "Encodez le salaire brut moyen théorique manuellement."
+        )
+
+    use_auto_salary = st.checkbox(
+        "Utiliser le salaire calculé automatiquement",
+        value=calculated_theoretical is not None,
+        key="c4_acs_use_auto_salary",
+        disabled=calculated_theoretical is None,
+    )
+
+    if use_auto_salary and calculated_theoretical is not None:
+        theoretical_salary = float(calculated_theoretical)
+        st.number_input(
+            "Salaire brut moyen théorique à reporter",
+            min_value=0.0,
+            value=theoretical_salary,
+            step=0.01,
+            format="%.2f",
+            disabled=True,
+            key="c4_acs_theoretical_salary_auto_display",
+        )
+    else:
+        theoretical_salary = st.number_input(
+            "Salaire brut moyen théorique à reporter",
+            min_value=0.0,
+            value=0.0,
+            step=0.01,
+            format="%.2f",
+            key="c4_acs_theoretical_salary_manual",
+        )
+
+    salary_frequency = "par mois"
+    st.text_input(
+        "Périodicité",
+        value="par mois",
+        disabled=True,
+        key="c4_acs_salary_frequency_display",
+    )
+
+    exact_gross = None
+    quarter_label = ""
+    quarter_rows = []
+
+    if occupation_end:
+        _, quarter_start, quarter_end, quarter_label = quarter_info(occupation_end)
+        st.markdown(f"**Trimestre de la fin d'occupation : {quarter_label}**")
+
+        dmfa_accepted = st.radio(
+            "La déclaration DmfA de ce trimestre est-elle déjà déclarée et acceptée par l'ONSS ?",
+            ["Oui", "Non"],
+            index=1,
+            horizontal=True,
+            key="c4_acs_dmfa_accepted",
+        )
+
+        if dmfa_accepted == "Non":
+            candidates = [
+                e for e in entries
+                if _entry_in_quarter(e, quarter_start, quarter_end)
+                and (
+                    source_entry.q is None
+                    or e.q is None
+                    or abs((e.q or 0) - (source_entry.q or 0)) < 0.001
+                )
+                and (
+                    source_entry.s is None
+                    or e.s is None
+                    or abs((e.s or 0) - (source_entry.s or 0)) < 0.001
+                )
+            ]
+            if not candidates:
+                candidates = [e for e in entries if _entry_in_quarter(e, quarter_start, quarter_end)]
+
+            candidate_labels = [_entry_label(e) for e in candidates]
+            selected_labels = st.multiselect(
+                "Fiches de paie à additionner pour le salaire brut exact du trimestre",
+                candidate_labels,
+                default=candidate_labels,
+                key="c4_acs_exact_entries",
+            )
+
+            selected_entries = [
+                candidates[candidate_labels.index(label)]
+                for label in selected_labels
+            ]
+            suggested_exact = round(
+                sum(
+                    (entry.gross or 0.0) + (entry.fr_amount if entry.fr_found else 0.0)
+                    for entry in selected_entries
+                ),
+                2,
+            )
+
+            exact_gross = st.number_input(
+                "Salaire brut exact du trimestre",
+                min_value=0.0,
+                value=float(suggested_exact),
+                step=0.01,
+                format="%.2f",
+                key="c4_acs_exact_gross",
+                help=(
+                    "Proposition calculée à partir des bruts réellement payés sur les fiches sélectionnées. "
+                    "Vérifiez le montant avec la DmfA si nécessaire."
+                ),
+            )
+
+            qrow_start = max(quarter_start, occupation_start) if occupation_start else quarter_start
+            qrow_end = min(quarter_end, occupation_end)
+            has_interruption = st.checkbox(
+                "Il y a eu une interruption à déclarer pendant ce trimestre",
+                value=False,
+                key="c4_acs_qrow_interruption",
+            )
+            q_changed = st.checkbox(
+                "La durée de travail diffère de Q pendant une partie du trimestre",
+                value=False,
+                key="c4_acs_qrow_qdiff",
+            )
+            quarter_rows = [
+                {
+                    "start": qrow_start,
+                    "end": qrow_end,
+                    "interruption": has_interruption,
+                    "q_diff": q_changed,
+                }
+            ]
+        else:
+            st.caption(
+                "Le salaire brut exact et la partie B ne sont pas complétés pour un trimestre déjà accepté, "
+                "sauf situation particulière."
+            )
+    else:
+        st.caption("Complétez la date de fin pour déterminer le trimestre ONSS.")
+
+    # --------------------------------------------------------
+    # 7. VACANCES / JOURS FERIES / REPOS
+    # --------------------------------------------------------
+    st.subheader("7. Vacances et jours encore rémunérés")
+
+    default_vacation_type = "Temps plein" if q > 0 and s > 0 and abs(q - s) < 0.001 else "Temps partiel"
+    vacation_type = st.radio(
+        "Vacances légales",
+        ["Temps partiel", "Temps plein"],
+        index=1 if default_vacation_type == "Temps plein" else 0,
+        horizontal=True,
+        key="c4_acs_vacation_type",
+    )
+    vacation_amount = st.number_input(
+        "Nombre d'heures (temps partiel) ou de jours (temps plein) de vacances rémunérées depuis le 1er janvier",
+        min_value=0.0,
+        value=0.0,
+        step=0.5,
+        key="c4_acs_vacation_amount",
+    )
+
+    network = str((fase_record or {}).get("reseau", "")).lower()
+    if "libre" in network:
+        public_default = "Secteur privé"
+    elif "communal" in network or "provinc" in network or "fédération" in network or "federation" in network:
+        public_default = "Secteur public"
+    else:
+        public_default = "Non applicable"
+
+    regime_options = ["Non applicable", "Secteur public", "Secteur privé"]
+    public_regime = st.selectbox(
+        "Régime de vacances - pouvoirs publics",
+        regime_options,
+        index=regime_options.index(public_default),
+        key="c4_acs_public_regime",
+    )
+
+    holidays_text = st.text_input(
+        "Jours fériés payés après la fin du contrat (séparés par des virgules, JJ/MM/AAAA)",
+        key="c4_acs_holidays",
+    )
+    paid_holidays_after_end: list[date] = []
+    holiday_errors = []
+    for chunk in [x.strip() for x in holidays_text.split(",") if x.strip()]:
+        d, err = _parse_user_date(chunk)
+        if d:
+            paid_holidays_after_end.append(d)
+        if err:
+            holiday_errors.append(chunk)
+
+    comp_rest_days = st.number_input(
+        "Jours encore rémunérés après la fin pour repos compensatoire / heures supplémentaires",
+        min_value=0.0,
+        value=0.0,
+        step=0.5,
+        key="c4_acs_comp_rest",
+    )
+
+    # --------------------------------------------------------
+    # 8. FIN DU CONTRAT
+    # --------------------------------------------------------
+    st.subheader("8. Fin de l'occupation")
+
+    end_reason = st.selectbox(
+        "Comment le contrat a-t-il pris fin ?",
+        [
+            "Durée déterminée arrivée à terme",
+            "Travail déterminé arrivé à terme",
+            "Préavis par l'employeur",
+            "Rupture par l'employeur",
+            "Démission / abandon volontaire",
+            "Commun accord",
+            "Force majeure médicale",
+            "Force majeure autre",
+        ],
+        key="c4_acs_end_reason",
+    )
+
+    precise_reason_default = ""
+    if end_reason == "Préavis par l'employeur":
+        precise_reason_default = "Fin de l'occupation à l'initiative de l'employeur avec préavis"
+    elif end_reason == "Rupture par l'employeur":
+        precise_reason_default = "Fin de l'occupation à l'initiative de l'employeur"
+    elif end_reason == "Commun accord":
+        precise_reason_default = "Fin de l'occupation de commun accord"
+    elif end_reason.startswith("Force majeure"):
+        precise_reason_default = "Fin de l'occupation pour force majeure"
+
+    precise_reason = st.text_area(
+        "Motif précis du chômage",
+        value=precise_reason_default,
+        key="c4_acs_precise_reason",
+        help="Le formulaire exige ce motif notamment pour certaines fins à l'initiative de l'employeur, de commun accord ou pour force majeure.",
+    )
+
+    notice_method = "Lettre recommandée"
+    notice_sent = None
+    if end_reason == "Préavis par l'employeur":
+        notice_method = st.radio(
+            "Notification du préavis",
+            ["Lettre recommandée", "Exploit d'huissier"],
+            horizontal=True,
+            key="c4_acs_notice_method",
+        )
+        notice_sent_txt = _masked_date_input(
+            "Date d'envoi / notification",
+            key="c4_acs_notice_sent",
+        )
+        notice_sent, _ = _parse_user_date(notice_sent_txt)
+
+    st.subheader("9. Indemnité liée à la fin")
+    indemnity_type = st.selectbox(
+        "Une indemnité a-t-elle été payée ?",
+        ["Aucune", "Salaire pendant le délai de préavis", "Indemnité de congé / rupture", "Autre indemnité"],
+        key="c4_acs_indemnity_type",
+    )
+
+    indemnity_start = indemnity_end = None
+    other_indemnity_name = ""
+    other_indemnity_amount = 0.0
+    if indemnity_type != "Aucune":
+        c1, c2 = st.columns(2)
+        with c1:
+            ind_start_txt = _masked_date_input(
+                "Période couverte - du",
+                key="c4_acs_ind_start",
+            )
+        with c2:
+            ind_end_txt = _masked_date_input(
+                "Période couverte - au",
+                key="c4_acs_ind_end",
+            )
+        indemnity_start, _ = _parse_user_date(ind_start_txt)
+        indemnity_end, _ = _parse_user_date(ind_end_txt)
+
+        if indemnity_type == "Autre indemnité":
+            other_indemnity_name = st.text_input(
+                "Nature de l'autre indemnité",
+                key="c4_acs_other_ind_name",
+            )
+            other_indemnity_amount = st.number_input(
+                "Montant de l'autre indemnité",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                key="c4_acs_other_ind_amount",
+            )
+
+    remarks = st.text_area("Remarques", key="c4_acs_remarks")
+
+    # --------------------------------------------------------
+    # 10. SIGNATURE / GENERATION
+    # --------------------------------------------------------
+    st.subheader("10. C4 classique prêt à imprimer")
+
+    pact_generations = st.selectbox(
+        "Pacte des générations",
+        [
+            "Non concerné / ne pas compléter",
+            "Licenciement - cellule emploi créée",
+            "Licenciement - pas de cellule emploi",
+            "Pas un licenciement",
+        ],
+        key="c4_acs_pact",
+    )
+    complementary_indemnity = st.radio(
+        "Indemnité complémentaire sans cotisations salariales ONSS ?",
+        ["Non", "Oui"],
+        horizontal=True,
+        key="c4_acs_compl_ind",
+    )
+    responsible_name = st.text_input(
+        "Nom du responsable / délégué qui signera le C4",
+        key="c4_acs_responsible",
+    )
+    declaration_date = st.date_input(
+        "Date de la déclaration",
+        value=date.today(),
+        format="DD/MM/YYYY",
+        key="c4_acs_decl_date",
+    )
+
+    # --------------------------------------------------------
+    # CONTROLES
+    # --------------------------------------------------------
+    errors = []
+    if e1:
+        errors.append("Date de début de l'occupation manquante ou invalide.")
+    if e2:
+        errors.append("Date d'entrée en service manquante ou invalide.")
+    if e3:
+        errors.append("Date de fin de l'occupation manquante ou invalide.")
+    if not fonction_acs:
+        errors.append("Fonction manquante.")
+    if fonction_acs == "Puériculteur(trice) PTP":
+        if programme != "PTP":
+            errors.append("La fonction Puériculteur(trice) PTP doit être associée au programme PTP.")
+        if regime_horaire != "4/5e temps — 32/36":
+            errors.append("La fonction Puériculteur(trice) PTP impose le régime 4/5e temps (32/36).")
+
+    if not employee_name.strip():
+        errors.append("Nom du travailleur manquant.")
+    if len(re.sub(r"\D", "", niss)) != 11:
+        errors.append("Le NISS doit contenir 11 chiffres.")
+    if not fase:
+        errors.append("Numéro FASE de l'établissement manquant.")
+    elif not fase_record:
+        errors.append(f"Numéro FASE {fase} introuvable dans le répertoire FWB.")
+    if not employer_name.strip():
+        errors.append("Nom / raison sociale du pouvoir organisateur manquant.")
+    if not employer_address.strip():
+        errors.append("Adresse du pouvoir organisateur manquante.")
+    if not enterprise_number.strip() and not onss_number.strip():
+        errors.append("Complétez au moins le numéro d'entreprise BCE ou le numéro ONSS de l'employeur.")
+    if not re.fullmatch(r"\d{3}", worker_code.strip()):
+        errors.append("Le code travailleur doit contenir exactement 3 chiffres.")
+    if q <= 0 or s <= 0:
+        errors.append("Q et S doivent être supérieurs à 0.")
+    if theoretical_salary <= 0:
+        errors.append("Salaire brut moyen théorique manquant.")
+    if holiday_errors:
+        errors.append("Une ou plusieurs dates de jours fériés sont invalides.")
+    if not responsible_name.strip():
+        errors.append("Nom du responsable / délégué manquant.")
+    if occupation_end and st.session_state.get("c4_acs_dmfa_accepted") == "Non" and (exact_gross is None or exact_gross <= 0):
+        errors.append("Salaire brut exact du trimestre manquant pour une DmfA non encore acceptée.")
+
+    for error in errors:
+        st.warning(error)
+
+    template_pdf, template_error = _template_bytes(TEMPLATE_C4_CLASSIQUE)
+    if template_error:
+        st.error(template_error)
+        return
+
+    if not _template_contains_version(template_pdf, EXPECTED_C4_CLASSIQUE_VERSION):
+        st.error(
+            "Le PDF placé dans assets/c4_classique_officiel.pdf ne correspond pas à la version "
+            f"attendue ({EXPECTED_C4_CLASSIQUE_VERSION}). Les coordonnées d'impression pourraient être incorrectes."
+        )
+        return
+
+    if errors:
+        st.info("Corrigez les éléments ci-dessus avant de générer le C4 prêt à imprimer.")
+        return
+
+    data = {
+        "fonction": fonction_acs,
+        "employee_name": employee_name,
+        "niss": niss,
+        "employer_name": employer_name,
+        "employer_address": employer_address,
+        "employer_category": employer_category,
+        "enterprise_number": enterprise_number,
+        "joint_committee": joint_committee,
+        "onss_number": onss_number,
+        "occupation_start": occupation_start,
+        "service_start": service_start,
+        "occupation_end": occupation_end,
+        "worker_code": worker_code,
+        "status": status,
+        "employment_measure": employment_measure,
+        "onss_case": onss_case,
+        "q": q,
+        "s": s,
+        "theoretical_salary": theoretical_salary,
+        "salary_frequency": salary_frequency,
+        "exact_gross": exact_gross if exact_gross and exact_gross > 0 else None,
+        "quarter_label": quarter_label,
+        "vacation_type": vacation_type,
+        "vacation_amount": vacation_amount,
+        "public_regime": public_regime,
+        "paid_holidays_after_end": paid_holidays_after_end,
+        "comp_rest_days": comp_rest_days,
+        "quarter_rows": quarter_rows,
+        "end_reason": end_reason,
+        "precise_reason": precise_reason,
+        "notice_method": notice_method,
+        "notice_sent": notice_sent,
+        "indemnity_type": indemnity_type,
+        "indemnity_start": indemnity_start,
+        "indemnity_end": indemnity_end,
+        "other_indemnity_name": other_indemnity_name,
+        "other_indemnity_amount": other_indemnity_amount,
+        "remarks": remarks,
+        "pact_generations": pact_generations,
+        "complementary_indemnity": complementary_indemnity,
+        "responsible_name": responsible_name,
+        "declaration_date": declaration_date,
+    }
+
+    try:
+        pdf_bytes = generate_c4_classique_pdf(data, template_pdf)
+    except Exception as exc:
+        st.error(f"La génération du PDF a échoué : {exc}")
+        return
+
+    st.success(
+        f"Le C4 classique {programme} est prêt à imprimer. "
+        "La rubrique destinée au travailleur reste inchangée."
+    )
+    st.download_button(
+        f"Télécharger le C4 {programme} prêt à imprimer",
+        data=pdf_bytes,
+        file_name=f"C4_{programme.replace('-', '_')}_complete.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
+
+
+# ============================================================
 # INTERFACE STREAMLIT
 # ============================================================
 
@@ -1712,8 +2566,8 @@ def render_c4_assistant():
 
     st.write(
         "Importez une ou plusieurs fiches de paie. L'outil extrait les données utiles, "
-        "vous laisse les vérifier, puis calcule les informations à reporter sur le "
-        "C4-Enseignement."
+        "vous laisse les vérifier, puis prépare soit le C4-Enseignement, soit le C4 classique "
+        "selon la situation du membre du personnel."
     )
 
     st.info(
@@ -1742,11 +2596,19 @@ def render_c4_assistant():
     if personnel_type == "Sélectionnez une situation":
         return
 
+    if personnel_type == "ACS / APE / PART-APE / PTP":
+        st.info(
+            "Cette situation relève du C4 classique. Les mêmes fiches de paie FWB peuvent être utilisées "
+            "pour préremplir automatiquement les données de rémunération et de fraction d'occupation."
+        )
+        render_c4_classique_acs_ape()
+        return
+
     if personnel_type != (
         "Personnel enseignant / direction / auxiliaire d'éducation / paramédical payé par la FWB"
     ):
-        st.info("Cette situation relève du C4 classique. Le module génère donc le formulaire C4-CERTIFICAT DE CHÔMAGE.")
-        render_c4_classique()
+        st.info("Cette situation relève du C4 classique.")
+        render_c4_classique_manuel()
         return
 
     # --------------------------------------------------------
