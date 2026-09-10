@@ -734,6 +734,8 @@ def _clear_occ_fields(prefix: str):
         "period_additional",
         "mode_override",
         "onss_case",
+        "onss_period_start",
+        "onss_period_end",
         "dmfa_state",
     ]
     for suffix in suffixes:
@@ -1157,8 +1159,16 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
             box1, box2, box3, box4 = lay["onss_boxes"]
             if onss_text.startswith("ont été prélevées du"):
                 _draw_box_x(c, *box2)
-                _draw_clean_date(c, 252, lay["onss_date_y"], occ.get("start_date"), mask_width=84, size=6.8)
-                _draw_clean_date(c, 348, lay["onss_date_y"], occ.get("end_date"), mask_width=92, size=6.8)
+                _draw_clean_date(
+                    c, 252, lay["onss_date_y"],
+                    occ.get("onss_period_start"),
+                    mask_width=84, size=6.8,
+                )
+                _draw_clean_date(
+                    c, 348, lay["onss_date_y"],
+                    occ.get("onss_period_end"),
+                    mask_width=92, size=6.8,
+                )
             elif onss_text.startswith("ont été prélevées"):
                 _draw_box_x(c, *box1)
             elif onss_text.startswith("n'ont pas été prélevées"):
@@ -2774,24 +2784,159 @@ def render_c4_assistant():
         )
         mode_payment = auto_mode if mode_choice.startswith("Automatique") else mode_choice
 
-        # COTISATIONS ONSS
-        onss_case = st.selectbox(
-            "Cotisations ONSS — secteur chômage",
-            [
-                "Paiement FWB normal",
-                "Incapacité de travail à charge de la mutuelle pendant le trimestre concerné",
-                "Interruption de carrière totale pendant le trimestre concerné",
-            ],
-            key=f"{prefix}_onss_case",
-        )
-        if onss_case == "Paiement FWB normal":
-            onss_text = (
-                f"ont été prélevées du {_format_date(start_date)} au {_format_date(end_date)}"
-                if start_date and end_date
-                else "ont été prélevées — période à compléter"
+        # ----------------------------------------------------
+        # COTISATIONS ONSS — SECTEUR CHÔMAGE
+        # ----------------------------------------------------
+        # La case à cocher dépend d'abord du statut.
+        # - temporaire / convention premier emploi : cotisations normalement prélevées ;
+        # - définitif / statutaire : cotisations normalement non prélevées ;
+        # - « seront versées » uniquement dans le cas particulier de l'art. 9.
+        # La case « ont été prélevées du ... au ... » n'est utilisée que lorsqu'il
+        # faut réellement déclarer une période particulière de prélèvement.
+        onss_period_start: Optional[date] = None
+        onss_period_end: Optional[date] = None
+
+        if statut in ("Temporaire", "Convention premier emploi"):
+            onss_case = st.selectbox(
+                "Cotisations ONSS — secteur chômage",
+                [
+                    "Ont été prélevées",
+                    "Ont été prélevées uniquement pendant une période déterminée",
+                ],
+                key=f"{prefix}_onss_case",
             )
+
+            if onss_case == "Ont été prélevées":
+                onss_text = "ont été prélevées"
+            else:
+                st.caption(
+                    "N'utilisez cette option que si les cotisations chômage ont réellement été "
+                    "prélevées pendant une période plus limitée que l'occupation."
+                )
+                oc1, oc2 = st.columns(2)
+                with oc1:
+                    onss_start_text = _masked_date_input(
+                        "Cotisations ONSS prélevées — du",
+                        key=f"{prefix}_onss_period_start",
+                    )
+                with oc2:
+                    onss_end_text = _masked_date_input(
+                        "Cotisations ONSS prélevées — au",
+                        key=f"{prefix}_onss_period_end",
+                    )
+
+                onss_period_start, onss_start_error = _parse_user_date(onss_start_text)
+                onss_period_end, onss_end_error = _parse_user_date(onss_end_text)
+
+                if onss_start_error:
+                    global_errors.append(
+                        f"Occupation {occ_index} — date de début de la période de prélèvement ONSS : "
+                        f"{onss_start_error}"
+                    )
+                if onss_end_error:
+                    global_errors.append(
+                        f"Occupation {occ_index} — date de fin de la période de prélèvement ONSS : "
+                        f"{onss_end_error}"
+                    )
+                if (
+                    onss_period_start
+                    and onss_period_end
+                    and onss_period_end < onss_period_start
+                ):
+                    global_errors.append(
+                        f"Occupation {occ_index} — la fin de la période de prélèvement ONSS "
+                        "est antérieure à son début."
+                    )
+
+                if onss_period_start and onss_period_end:
+                    onss_text = (
+                        f"ont été prélevées du {_format_date(onss_period_start)} "
+                        f"au {_format_date(onss_period_end)}"
+                    )
+                else:
+                    onss_text = "ont été prélevées du — au —"
+
+        elif statut == "Définitif / statutaire":
+            onss_case = st.selectbox(
+                "Cotisations ONSS — secteur chômage",
+                [
+                    "N'ont pas été prélevées (enseignant statutaire)",
+                    "Seront versées — conditions de l'article 9 de la loi du 20/07/1991",
+                ],
+                key=f"{prefix}_onss_case",
+            )
+            if onss_case.startswith("Seront versées"):
+                onss_text = "seront versées"
+                st.warning(
+                    "Sélectionnez « seront versées » uniquement si les conditions de l'article 9 "
+                    "de la loi du 20 juillet 1991 sont remplies."
+                )
+            else:
+                onss_text = "n'ont pas été prélevées (enseignant statutaire)"
+
         else:
-            onss_text = "n'ont pas été prélevées (enseignant statutaire)"
+            # Pour un statut « Autre », aucune déduction automatique n'est suffisamment sûre.
+            onss_case = st.selectbox(
+                "Cotisations ONSS — secteur chômage",
+                [
+                    "Ont été prélevées",
+                    "Ont été prélevées uniquement pendant une période déterminée",
+                    "N'ont pas été prélevées (enseignant statutaire)",
+                    "Seront versées — conditions de l'article 9 de la loi du 20/07/1991",
+                ],
+                key=f"{prefix}_onss_case",
+            )
+
+            if onss_case == "Ont été prélevées":
+                onss_text = "ont été prélevées"
+            elif onss_case.startswith("N'ont pas été prélevées"):
+                onss_text = "n'ont pas été prélevées (enseignant statutaire)"
+            elif onss_case.startswith("Seront versées"):
+                onss_text = "seront versées"
+                st.warning(
+                    "Sélectionnez « seront versées » uniquement si les conditions de l'article 9 "
+                    "de la loi du 20 juillet 1991 sont remplies."
+                )
+            else:
+                oc1, oc2 = st.columns(2)
+                with oc1:
+                    onss_start_text = _masked_date_input(
+                        "Cotisations ONSS prélevées — du",
+                        key=f"{prefix}_onss_period_start",
+                    )
+                with oc2:
+                    onss_end_text = _masked_date_input(
+                        "Cotisations ONSS prélevées — au",
+                        key=f"{prefix}_onss_period_end",
+                    )
+                onss_period_start, onss_start_error = _parse_user_date(onss_start_text)
+                onss_period_end, onss_end_error = _parse_user_date(onss_end_text)
+                if onss_start_error:
+                    global_errors.append(
+                        f"Occupation {occ_index} — date de début de la période de prélèvement ONSS : "
+                        f"{onss_start_error}"
+                    )
+                if onss_end_error:
+                    global_errors.append(
+                        f"Occupation {occ_index} — date de fin de la période de prélèvement ONSS : "
+                        f"{onss_end_error}"
+                    )
+                if (
+                    onss_period_start
+                    and onss_period_end
+                    and onss_period_end < onss_period_start
+                ):
+                    global_errors.append(
+                        f"Occupation {occ_index} — la fin de la période de prélèvement ONSS "
+                        "est antérieure à son début."
+                    )
+                if onss_period_start and onss_period_end:
+                    onss_text = (
+                        f"ont été prélevées du {_format_date(onss_period_start)} "
+                        f"au {_format_date(onss_period_end)}"
+                    )
+                else:
+                    onss_text = "ont été prélevées du — au —"
 
         # ----------------------------------------------------
         # SALAIRE BRUT EXACT - AUTOMATIQUE PAR REGLE DE TROIS
@@ -2805,11 +2950,16 @@ def render_c4_assistant():
             dmfa_state = st.radio(
                 f"Le trimestre ONSS {quarter_label} est-il déjà déclaré et accepté en DmfA ?",
                 [
-                    "Non / le salaire brut exact doit être complété",
                     "Oui / ne pas compléter le salaire brut exact",
+                    "Non / le salaire brut exact doit être complété",
                     "Je ne sais pas",
                 ],
+                index=2,
                 key=f"{prefix}_dmfa_state",
+                help=(
+                    "Le salaire brut exact ne doit être inscrit que pour un trimestre ONSS "
+                    "qui n'est pas encore déclaré ou dont la déclaration n'est pas encore acceptée."
+                ),
             )
 
             if dmfa_state == "Non / le salaire brut exact doit être complété":
@@ -2833,9 +2983,16 @@ def render_c4_assistant():
                             f"Occupation {occ_index} — le salaire brut exact du trimestre n'a pas pu être calculé."
                         )
 
+            elif dmfa_state == "Oui / ne pas compléter le salaire brut exact":
+                st.caption(
+                    "Le trimestre est déclaré et accepté : le champ « Salaire brut exact » "
+                    "restera vide sur le C4."
+                )
+
             elif dmfa_state == "Je ne sais pas":
-                global_errors.append(
-                    f"Occupation {occ_index} — vérifiez si le trimestre {quarter_label} est déjà déclaré/accepté en DmfA."
+                st.warning(
+                    f"Vérifiez si le trimestre {quarter_label} est déjà déclaré et accepté en DmfA. "
+                    "En attendant, le champ « Salaire brut exact » restera vide sur le C4."
                 )
 
         occupation_results.append(
@@ -2852,6 +3009,8 @@ def render_c4_assistant():
                 "salary_monthly": salary_monthly,
                 "mode_payment": mode_payment,
                 "onss_text": onss_text,
+                "onss_period_start": onss_period_start,
+                "onss_period_end": onss_period_end,
                 "quarter_label": quarter_label,
                 "dmfa_state": dmfa_state,
                 "exact_total": exact_total,
