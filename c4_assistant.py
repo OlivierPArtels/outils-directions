@@ -1193,56 +1193,63 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
         end_reason = data.get("end_reason", "")
 
         if end_reason == "Fin de plein droit et sans préavis":
-            _draw_box_x(c, 29.5, 530.0, 6.5, 6.5)
-            _draw_clean_date(c, 257, 528.0, end_date, mask_width=90, size=7.2)
+            # Sur le formulaire officiel, cette première situation ne comporte
+            # PAS de case à cocher. Il faut uniquement compléter la date.
+            # Coordonnées relevées directement sur la version 06.07.2023.
+            _draw_clean_date(c, 211.4, 766.8, end_date, mask_width=91, size=7.2)
 
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation avec préavis":
-            _draw_box_x(c, 29.5, 683.2, 6.5, 6.5)
-            _draw_clean_date(c, 183, 681.0, data.get("notice_start"), mask_width=89, size=7.0)
-            _draw_clean_date(c, 293, 681.0, data.get("notice_end"), mask_width=89, size=7.0)
+            # Case : « Le pouvoir organisateur a mis fin à l'occupation le ... »
+            _draw_box_x(c, 29.5, 717.0, 6.5, 6.5)
+            _draw_clean_date(c, 209.1, 718.8, end_date, mask_width=89, size=7.0)
 
+            # Mode de notification du préavis.
             if data.get("notice_method") == "Exploit d'huissier":
-                _draw_box_x(c, 259.0, 665.0, 6.5, 6.5)
+                _draw_box_x(c, 142.0, 681.0, 6.5, 6.5)
             else:
-                _draw_box_x(c, 160.0, 665.0, 6.5, 6.5)
+                _draw_box_x(c, 142.0, 699.0, 6.5, 6.5)
+
+            # Période couverte par le préavis.
+            _draw_clean_date(c, 157.1, 664.8, data.get("notice_start"), mask_width=89, size=7.0)
+            _draw_clean_date(c, 261.8, 664.8, data.get("notice_end"), mask_width=89, size=7.0)
 
             suspended = bool(data.get("notice_suspended"))
             if suspended:
-                _draw_box_x(c, 251.8, 647.2, 6.5, 6.5)
+                _draw_box_x(c, 251.8, 645.0, 6.5, 6.5)
             else:
-                _draw_box_x(c, 159.6, 647.2, 6.5, 6.5)
+                _draw_box_x(c, 159.6, 645.0, 6.5, 6.5)
 
             if suspended:
                 suspension_reason = data.get("notice_suspension_reason", "")
                 if suspension_reason == "Maladie":
-                    _draw_box_x(c, 377.3, 647.2, 6.5, 6.5)
+                    _draw_box_x(c, 377.3, 645.0, 6.5, 6.5)
                 elif suspension_reason == "Vacances":
-                    _draw_box_x(c, 377.3, 629.2, 6.5, 6.5)
+                    _draw_box_x(c, 377.3, 627.0, 6.5, 6.5)
                 elif suspension_reason:
-                    _draw_box_x(c, 377.3, 611.2, 6.5, 6.5)
-                    _draw_clean_value(c, 412, 610.4, suspension_reason, size=6.8, max_width=125)
-                _draw_clean_date(c, 189, 594.0, data.get("notice_extended_until"), mask_width=90, size=7.0)
+                    _draw_box_x(c, 377.3, 609.0, 6.5, 6.5)
+                    _draw_clean_value(c, 411.2, 610.7, suspension_reason, size=6.8, max_width=129)
+                _draw_clean_date(c, 188.9, 595.8, data.get("notice_extended_until"), mask_width=92, size=7.0)
 
             transition = bool(data.get("transition"))
             if transition:
-                _draw_box_x(c, 106.8, 560.0, 5.8, 5.8)
-                _draw_clean_date(c, 141, 558.0, data.get("transition_start"), mask_width=89, size=6.8)
-                _draw_clean_date(c, 246, 558.0, data.get("transition_end"), mask_width=89, size=6.8)
+                _draw_box_x(c, 106.5, 558.0, 5.8, 5.8)
+                _draw_clean_date(c, 141.3, 559.8, data.get("transition_start"), mask_width=89, size=6.8)
+                _draw_clean_date(c, 246.1, 559.8, data.get("transition_end"), mask_width=89, size=6.8)
             else:
-                _draw_box_x(c, 79.0, 560.0, 6.0, 5.8)
+                _draw_box_x(c, 79.0, 558.0, 6.0, 5.8)
 
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation sans préavis":
-            _draw_box_x(c, 29.5, 512.0, 6.5, 6.5)
-            _draw_clean_date(c, 253, 510.0, end_date, mask_width=90, size=7.2)
+            _draw_box_x(c, 29.5, 510.0, 6.5, 6.5)
+            _draw_clean_date(c, 252.8, 511.8, end_date, mask_width=93, size=7.2)
 
         elif end_reason == "Le membre du personnel a quitté volontairement son emploi":
-            _draw_box_x(c, 29.5, 494.0, 6.5, 6.5)
-            _draw_clean_date(c, 211, 492.0, end_date, mask_width=90, size=7.2)
+            _draw_box_x(c, 29.5, 492.0, 6.5, 6.5)
+            _draw_clean_date(c, 211.4, 493.8, end_date, mask_width=93, size=7.2)
 
         if data.get("rupture_indemnity"):
-            _draw_box_x(c, 29.5, 737.2, 6.5, 6.5)
-            _draw_clean_date(c, 248.5, 735.2, data.get("rupture_start"), mask_width=89, size=7.0)
-            _draw_clean_date(c, 355.0, 735.2, data.get("rupture_end"), mask_width=89, size=7.0)
+            _draw_box_x(c, 29.5, 735.0, 6.5, 6.5)
+            _draw_clean_date(c, 248.6, 736.8, data.get("rupture_start"), mask_width=89, size=7.0)
+            _draw_clean_date(c, 355.3, 736.8, data.get("rupture_end"), mask_width=89, size=7.0)
 
         motive = (data.get("motif_chomage", "") or "").strip()
         if not motive:
