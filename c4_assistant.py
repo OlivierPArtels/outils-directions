@@ -1240,6 +1240,69 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         text = f"{float(value):.{decimals}f}".replace(".", ",")
         clean_text(c, x, y, text, width, size=size)
 
+    def draw_centered_char(c, center_x, y, char, size=7.6):
+        if char is None or char == "":
+            return
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", size)
+        width = stringWidth(str(char), "Helvetica", size)
+        c.drawString(center_x - width / 2.0, y, str(char))
+
+    def draw_digits_in_cells(c, digits, centers, y, size=7.4):
+        digits = re.sub(r"\D", "", str(digits or ""))
+        for char, center_x in zip(digits, centers):
+            draw_centered_char(c, center_x, y, char, size=size)
+
+    def draw_date_cells(c, value, centers, y, size=7.3):
+        if value:
+            draw_digits_in_cells(c, value.strftime("%d%m%Y"), centers, y, size=size)
+
+    def draw_fraction_boxes(c, value, centers, y, size=7.5):
+        if value is None:
+            return
+        try:
+            txt = f"{float(value):.2f}"
+        except (TypeError, ValueError):
+            return
+        integer, decimals = txt.split(".", 1)
+        integer = integer[-2:].rjust(2, "0")
+        draw_digits_in_cells(c, integer + decimals[:2], centers, y, size=size)
+
+    def draw_money_parts(c, value, integer_right, decimal_left, y, size=7.7):
+        if value is None:
+            return
+        try:
+            txt = f"{float(value):.2f}"
+        except (TypeError, ValueError):
+            return
+        integer, decimals = txt.split(".", 1)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", size)
+        # Masque seulement sous les chiffres, pas sur tout le champ.
+        iw = stringWidth(integer, "Helvetica", size)
+        dw = stringWidth(decimals, "Helvetica", size)
+        _mask_pdf_area(c, integer_right - iw - 0.7, y - 1.6, iw + 1.4, size + 2.4)
+        _mask_pdf_area(c, decimal_left - 0.7, y - 1.6, dw + 1.4, size + 2.4)
+        c.drawRightString(integer_right, y, integer)
+        c.drawString(decimal_left, y, decimals)
+
+    def draw_quarter_cells(c, value, centers, y, size=7.2):
+        digits = re.sub(r"\D", "", str(value or ""))[:6]
+        draw_digits_in_cells(c, digits, centers, y, size=size)
+
+    def draw_vacation_parts(c, value, integer_right, decimal_center, y, size=7.3):
+        try:
+            txt = f"{float(value or 0):.1f}"
+        except (TypeError, ValueError):
+            txt = "0.0"
+        integer, decimal = txt.split(".", 1)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", size)
+        iw = stringWidth(integer, "Helvetica", size)
+        _mask_pdf_area(c, integer_right - iw - 0.5, y - 1.5, iw + 1.0, size + 2.2)
+        c.drawRightString(integer_right, y, integer)
+        draw_centered_char(c, decimal_center, y, decimal[:1], size=size)
+
     def draw_precise_reason(c, value):
         text = re.sub(r"\s+", " ", str(value or "")).strip()
         if not text:
@@ -1280,10 +1343,26 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_multiline(c, 28, 587, data.get("employer_address", ""), 7.8, 8.5, 112)
 
         # PARTIE A - OCCUPATION
-        _draw_date(c, 138, 555, data.get("occupation_start"), 7.8)
-        _draw_date(c, 385, 555, data.get("service_start"), 7.8)
-        _draw_date(c, 146, 533, data.get("occupation_end"), 7.8)
-        _draw_text(c, 348, 533, data.get("worker_code", ""), 7.8, 8)
+        # Dates : un chiffre dans chaque emplacement du formulaire.
+        draw_date_cells(
+            c, data.get("occupation_start"),
+            [142.55, 155.05, 172.65, 185.10, 202.65, 215.15, 227.65, 240.15],
+            555.0, 7.35
+        )
+        draw_date_cells(
+            c, data.get("service_start"),
+            [354.45, 367.05, 384.60, 397.05, 414.60, 427.05, 439.60, 452.15],
+            555.0, 7.35
+        )
+        draw_date_cells(
+            c, data.get("occupation_end"),
+            [134.75, 147.35, 164.85, 177.35, 194.85, 207.35, 219.90, 232.45],
+            533.0, 7.35
+        )
+        worker_code = re.sub(r"\D", "", str(data.get("worker_code", "") or ""))[:3]
+        if worker_code:
+            c.setFont("Helvetica", 7.7)
+            c.drawCentredString(365.0, 533.0, worker_code)
         _draw_text(c, 55, 520, data.get("status", ""), 7.8, 30)
         _draw_text(c, 149, 491, data.get("employment_measure", ""), 7.8, 15)
 
@@ -1293,9 +1372,13 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_check(c, 27, 462, onss_case == "Non retenues mais seront versées")
         _draw_check(c, 229, 462, onss_case == "Statutaire art. 9")
 
-        _draw_decimal(c, 49, 436, data.get("q"), 2, 8.0)
-        _draw_decimal(c, 49, 415, data.get("s"), 2, 8.0)
-        _draw_decimal(c, 144, 396, data.get("theoretical_salary"), 2, 8.0)
+        # Q et S : 1 chiffre par case, en respectant la virgule imprimée.
+        qs_centers = [57.14, 74.37, 97.01, 113.96]
+        draw_fraction_boxes(c, data.get("q"), qs_centers, 436.0, 7.55)
+        draw_fraction_boxes(c, data.get("s"), qs_centers, 411.25, 7.55)
+
+        # Salaire théorique : partie entière avant la virgule, décimales après.
+        draw_money_parts(c, data.get("theoretical_salary"), 208.0, 214.0, 396.0, 7.7)
 
         freq = data.get("salary_frequency", "par mois")
         freq_coords = {
@@ -1309,21 +1392,25 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         if freq in freq_coords:
             _draw_check(c, *freq_coords[freq], True)
 
-        # SALAIRE BRUT EXACT - CORRIGÉ
+        # SALAIRE BRUT EXACT : aligné sur la virgule fixe du formulaire.
         exact_gross = data.get("exact_gross")
         if exact_gross is not None:
-            clean_number(c, 117, 309.0, exact_gross, 86, decimals=2, size=8.0)
-            clean_text(c, 292, 309.0, data.get("quarter_label", ""), 79, size=7.7)
+            draw_money_parts(c, exact_gross, 160.5, 168.4, 309.0, 7.6)
+            draw_quarter_cells(
+                c, data.get("quarter_label", ""),
+                [294.35, 306.95, 324.45, 336.95, 349.40, 361.95],
+                309.0, 7.2
+            )
 
-        # VACANCES - CORRIGÉ
+        # VACANCES : nombre placé de part et d'autre de la virgule fixe.
         vacation_type = data.get("vacation_type", "Temps partiel")
         vacation_amount = float(data.get("vacation_amount", 0) or 0)
         if vacation_type == "Temps plein":
             _draw_box_x(c, 62.64, 250.22, 8.02, 9.99)
-            clean_number(c, 160, 251.0, vacation_amount, 33, decimals=1, size=7.7)
+            draw_vacation_parts(c, vacation_amount, 176.8, 187.5, 251.0, 7.3)
         else:
             _draw_box_x(c, 62.63, 238.82, 8.02, 9.99)
-            clean_number(c, 164, 239.6, vacation_amount, 33, decimals=1, size=7.7)
+            draw_vacation_parts(c, vacation_amount, 181.3, 192.1, 239.6, 7.3)
 
         public_regime = data.get("public_regime", "Non applicable")
         if public_regime == "Secteur public":
@@ -1334,9 +1421,14 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         holidays = data.get("paid_holidays_after_end", []) or []
         if holidays:
             _draw_box_x(c, 71.88, 192.98, 8.02, 9.99)
-            holiday_xs = [103.5, 217.5, 331.5, 445.5]
+            holiday_centers = [
+                [107.60, 120.20, 137.75, 150.10, 167.65, 180.20, 192.70, 205.20],
+                [222.70, 235.25, 252.75, 265.25, 282.80, 295.30, 307.80, 320.35],
+                [337.85, 350.40, 367.90, 380.40, 397.90, 410.45, 422.95, 435.45],
+                [453.00, 465.45, 483.00, 495.55, 513.00, 525.60, 538.05, 550.60],
+            ]
             for idx, holiday in enumerate(holidays[:4]):
-                clean_date(c, holiday_xs[idx], 195.6, holiday, width=47, size=6.8)
+                draw_date_cells(c, holiday, holiday_centers[idx], 195.6, 6.8)
         else:
             _draw_box_x(c, 41.76, 192.98, 8.02, 9.99)
 
@@ -1371,10 +1463,13 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
             },
         ]
 
+        part_b_start_centers = [56.50, 69.10, 86.70, 99.25, 116.75, 129.25, 141.70, 154.25]
+        part_b_end_centers = [194.85, 207.45, 225.05, 237.60, 255.05, 267.60, 280.05, 292.60]
+
         for idx, row in enumerate(qtr_rows[:2]):
             lay = row_layouts[idx]
-            clean_date(c, 52, lay["date_y"], row.get("start"), width=111, size=7.2)
-            clean_date(c, 190, lay["date_y"], row.get("end"), width=111, size=7.2)
+            draw_date_cells(c, row.get("start"), part_b_start_centers, lay["date_y"], 7.15)
+            draw_date_cells(c, row.get("end"), part_b_end_centers, lay["date_y"], 7.15)
             _draw_box_x(c, *(lay["int_oui"] if row.get("interruption", False) else lay["int_non"]))
             _draw_box_x(c, *(lay["q_oui"] if row.get("q_diff", False) else lay["q_non"]))
 
@@ -1457,7 +1552,12 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_check(c, 59, 666, complementary == "Oui")
         _draw_check(c, 59, 655, complementary == "Non")
 
-        _draw_date(c, 54, 527, data.get("declaration_date"), 7.8)
+        # Date de déclaration : un chiffre par emplacement.
+        draw_date_cells(
+            c, data.get("declaration_date"),
+            [48.25, 58.60, 72.95, 83.20, 97.60, 107.80, 118.10, 128.30],
+            527.0, 7.2
+        )
         _draw_text(c, 199, 542, data.get("responsible_name", ""), 7.8, 72)
 
     return _merge_overlays(template_pdf, {0: page1, 1: page2, 2: page3, 3: page4})
