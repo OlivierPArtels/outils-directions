@@ -1898,11 +1898,43 @@ def render_c4_classique_acs_ape():
     source_label = st.selectbox("Fiche de paie utilisée comme base", options=entry_options, key="c4_acs_source")
     source_entry = entry_map[source_label]
 
-    source_signature = f"{source_entry.file_name}|{source_entry.page_number}|{source_entry.employee_name}"
-    if st.session_state.get("_c4_acs_source_signature") != source_signature:
-        st.session_state["_c4_acs_source_signature"] = source_signature
-        st.session_state["c4_acs_employee_name"] = source_entry.employee_name
-        st.session_state["c4_acs_employee_address"] = source_entry.employee_address
+    # Synchronisation robuste du préremplissage ACS / APE.
+    # Streamlit conserve les valeurs des widgets entre les reruns. Une ancienne
+    # valeur vide pouvait donc rester affichée même si la fiche était bien lue.
+    # La version ci-dessous force une seule resynchronisation après cette mise à
+    # jour puis conserve les éventuelles corrections manuelles de l'utilisateur.
+    source_signature = "|".join(
+        [
+            "acs_prefill_v2",
+            source_entry.file_name,
+            str(source_entry.page_number),
+            source_entry.employee_name or "",
+            source_entry.employee_address or "",
+            str(source_entry.q if source_entry.q is not None else ""),
+            str(source_entry.s if source_entry.s is not None else ""),
+            str(source_entry.annual_base_salary if source_entry.annual_base_salary is not None else ""),
+            str(source_entry.pdf_index if source_entry.pdf_index is not None else ""),
+            str(source_entry.gross if source_entry.gross is not None else ""),
+        ]
+    )
+
+    if st.session_state.get("_c4_acs_prefill_signature") != source_signature:
+        st.session_state["_c4_acs_prefill_signature"] = source_signature
+        st.session_state["c4_acs_employee_name"] = source_entry.employee_name or ""
+        st.session_state["c4_acs_employee_address"] = source_entry.employee_address or ""
+
+        detected_q = float(source_entry.q or 0.0)
+        detected_s = float(source_entry.s or 0.0)
+        if abs(detected_q - 18.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+            st.session_state["c4_acs_regime_horaire"] = "Mi-temps — 18/36"
+        elif abs(detected_q - 32.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+            st.session_state["c4_acs_regime_horaire"] = "4/5e temps — 32/36"
+        elif abs(detected_q - 36.0) < 0.01 and abs(detected_s - 36.0) < 0.01:
+            st.session_state["c4_acs_regime_horaire"] = "Temps plein — 36/36"
+
+        # Force le recalcul de la rémunération proposée pour la nouvelle fiche.
+        st.session_state.pop("c4_acs_use_auto_salary", None)
+        st.session_state.pop("c4_acs_theoretical_salary_manual", None)
 
     st.subheader("3. Programme et fonction")
     programme_options = ["ACS", "APE", "PART-APE", "PTP"]
@@ -1943,7 +1975,7 @@ def render_c4_classique_acs_ape():
             key="c4_acs_niss",
             help="Le matricule figurant sur la fiche de paie n'est pas utilisé comme NISS.",
         )
-        st.text_area(
+        employee_address = st.text_area(
             "Adresse du membre du personnel (contrôle)",
             key="c4_acs_employee_address",
             height=85,
@@ -2288,6 +2320,7 @@ def render_c4_classique_acs_ape():
         "programme": programme,
         "employer_identity_mode": employer_identity_mode,
         "employee_name": employee_name,
+        "employee_address": employee_address,
         "niss": niss,
         "employer_name": employer_name,
         "employer_address": employer_address,
