@@ -542,10 +542,7 @@ def reconstruct_monthly_fr(entry: Optional[PayrollEntry]) -> float:
         return 0.0
     if not entry.period_start or not entry.period_end:
         return round(entry.fr_amount, 2)
-    if (
-        entry.period_start.year != entry.period_end.year
-        or entry.period_start.month != entry.period_end.month
-    ):
+    if entry.period_start.year != entry.period_end.year or entry.period_start.month != entry.period_end.month:
         return round(entry.fr_amount, 2)
 
     total_days = calendar.monthrange(entry.period_start.year, entry.period_start.month)[1]
@@ -560,8 +557,7 @@ def quarter_info(d: date) -> tuple[int, date, date, str]:
     start_month = 1 + (quarter - 1) * 3
     end_month = start_month + 2
     start = date(d.year, start_month, 1)
-    end_day = calendar.monthrange(d.year, end_month)[1]
-    end = date(d.year, end_month, end_day)
+    end = date(d.year, end_month, calendar.monthrange(d.year, end_month)[1])
     label = f"{quarter:02d}/{d.year}"
     return quarter, start, end, label
 
@@ -571,15 +567,7 @@ def calculate_exact_gross_rule_of_three(
     occupation_start: date,
     occupation_end: date,
 ) -> tuple[Optional[float], list[dict]]:
-    """
-    Calcule le salaire brut exact du trimestre de fin par règle de trois.
-
-    Pour chaque mois couvert dans le trimestre :
-        salaire mensuel / nombre de jours calendrier du mois × jours couverts.
-
-    Le calcul commence au plus tôt au premier jour du trimestre de fin et
-    s'arrête à la date de fin de l'occupation.
-    """
+    """Calcule le salaire brut exact du trimestre de fin par règle de trois."""
     if monthly_salary is None or monthly_salary <= 0:
         return None, []
     if occupation_start is None or occupation_end is None:
@@ -590,7 +578,6 @@ def calculate_exact_gross_rule_of_three(
     _, quarter_start, quarter_end, _ = quarter_info(occupation_end)
     calculation_start = max(occupation_start, quarter_start)
     calculation_end = min(occupation_end, quarter_end)
-
     if calculation_end < calculation_start:
         return None, []
 
@@ -678,20 +665,6 @@ def interruption_window(end_date: date) -> tuple[date, date]:
     return start, end_date
 
 
-def _same_status(a: str, b: str) -> bool:
-    a = (a or "").strip().lower()
-    b = (b or "").strip().lower()
-    if not a or not b:
-        return False
-    if "temp" in a and "temp" in b:
-        return True
-    if ("déf" in a or "def" in a or "stat" in a) and (
-        "déf" in b or "def" in b or "stat" in b
-    ):
-        return True
-    return a == b
-
-
 def _entry_in_quarter(entry: PayrollEntry, start: date, end: date) -> bool:
     if not entry.period_start or not entry.period_end:
         return False
@@ -719,27 +692,6 @@ def _parse_user_date(value: str) -> tuple[Optional[date], Optional[str]]:
     if not parsed:
         return None, "Date invalide. Utilisez JJ/MM/AAAA."
     return parsed, None
-
-
-def _clear_occ_fields(prefix: str):
-    suffixes = [
-        "fonction",
-        "statut",
-        "q",
-        "s",
-        "tab",
-        "fr_month",
-        "start",
-        "end",
-        "period_additional",
-        "mode_override",
-        "onss_case",
-        "onss_period_start",
-        "onss_period_end",
-        "dmfa_state",
-    ]
-    for suffix in suffixes:
-        st.session_state.pop(f"{prefix}_{suffix}", None)
 
 
 def _status_default_index(status: str) -> int:
@@ -789,6 +741,7 @@ def _detect_acs_program(entry: PayrollEntry) -> str:
     if re.search(r"\bAPE\b", text):
         return "APE"
     return ""
+
 
 # ============================================================
 # GENERATION PDF - OUTILS COMMUNS
@@ -914,23 +867,6 @@ def _draw_decimal(c, x: float, y: float, value: Optional[float], decimals: int =
         return
     txt = f"{float(value):.{decimals}f}".replace(".", ",")
     _draw_text(c, x, y, txt, size=size)
-
-
-def _draw_fraction_number(c, x: float, y: float, value: Optional[float], size: float = 8.0):
-    if value is None:
-        return
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return
-    _draw_text(c, x, y, f"{numeric:.2f}".replace(".", ","), size=size)
-
-
-def _draw_form_x(c, x: float, y: float, checked: bool, size: float = 7.0):
-    if not checked:
-        return
-    c.setFont("Helvetica-Bold", size)
-    c.drawString(x, y, "X")
 
 
 def _draw_niss(c, x: float, y: float, niss: str, size: float = 8.2):
@@ -1159,16 +1095,8 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
             box1, box2, box3, box4 = lay["onss_boxes"]
             if onss_text.startswith("ont été prélevées du"):
                 _draw_box_x(c, *box2)
-                _draw_clean_date(
-                    c, 252, lay["onss_date_y"],
-                    occ.get("onss_period_start"),
-                    mask_width=84, size=6.8,
-                )
-                _draw_clean_date(
-                    c, 348, lay["onss_date_y"],
-                    occ.get("onss_period_end"),
-                    mask_width=92, size=6.8,
-                )
+                _draw_clean_date(c, 252, lay["onss_date_y"], occ.get("start_date"), mask_width=84, size=6.8)
+                _draw_clean_date(c, 348, lay["onss_date_y"], occ.get("end_date"), mask_width=92, size=6.8)
             elif onss_text.startswith("ont été prélevées"):
                 _draw_box_x(c, *box1)
             elif onss_text.startswith("n'ont pas été prélevées"):
@@ -1203,23 +1131,16 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
         end_reason = data.get("end_reason", "")
 
         if end_reason == "Fin de plein droit et sans préavis":
-            # Sur le formulaire officiel, cette première situation ne comporte
-            # PAS de case à cocher. Il faut uniquement compléter la date.
-            # Coordonnées relevées directement sur la version 06.07.2023.
             _draw_clean_date(c, 211.4, 766.8, end_date, mask_width=91, size=7.2)
-
         elif end_reason == "Le pouvoir organisateur a mis fin à l'occupation avec préavis":
-            # Case : « Le pouvoir organisateur a mis fin à l'occupation le ... »
             _draw_box_x(c, 29.5, 717.0, 6.5, 6.5)
             _draw_clean_date(c, 209.1, 718.8, end_date, mask_width=89, size=7.0)
 
-            # Mode de notification du préavis.
             if data.get("notice_method") == "Exploit d'huissier":
                 _draw_box_x(c, 142.0, 681.0, 6.5, 6.5)
             else:
                 _draw_box_x(c, 142.0, 699.0, 6.5, 6.5)
 
-            # Période couverte par le préavis.
             _draw_clean_date(c, 157.1, 664.8, data.get("notice_start"), mask_width=89, size=7.0)
             _draw_clean_date(c, 261.8, 664.8, data.get("notice_end"), mask_width=89, size=7.0)
 
@@ -1290,16 +1211,65 @@ def generate_c4_enseignement_pdf(data: dict, template_pdf: bytes) -> bytes:
 
 # ============================================================
 # C4 CLASSIQUE - PDF
+# Coordonnées recalibrées sur le formulaire officiel 5 pages.
 # ============================================================
 
 
 def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
-    """Superpose les données sur le modèle officiel C4 classique.
+    """Génère le C4 classique ONEM 06.07.2023/830.10.016."""
 
-    Les coordonnées ci-dessous reprennent celles déjà utilisées par le projet.
-    """
+    def clean_text(c, x, y, value, width, size=7.6, max_chars=None):
+        if value is None:
+            return
+        text = str(value).replace("\u00a0", " ").strip()
+        if not text:
+            return
+        if max_chars:
+            text = text[:max_chars]
+        _mask_pdf_area(c, x - 1.0, y - 2.0, width, size + 4.0)
+        _draw_text(c, x, y, text, size=size)
+
+    def clean_date(c, x, y, value, width=48, size=7.2):
+        if not value:
+            return
+        clean_text(c, x, y, value.strftime("%d/%m/%Y"), width, size=size)
+
+    def clean_number(c, x, y, value, width, decimals=2, size=7.8):
+        if value is None:
+            return
+        text = f"{float(value):.{decimals}f}".replace(".", ",")
+        clean_text(c, x, y, text, width, size=size)
+
+    def draw_precise_reason(c, value):
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not text:
+            return
+
+        words = text.split()
+        lines = []
+        limits = [245.0, 525.0]
+        starts = [305.0, 27.0]
+
+        for line_index, limit in enumerate(limits):
+            current = ""
+            while words:
+                proposal = words[0] if not current else f"{current} {words[0]}"
+                if stringWidth(proposal, "Helvetica", 7.1) <= limit:
+                    current = proposal
+                    words.pop(0)
+                else:
+                    break
+            if current:
+                lines.append((starts[line_index], current, limit))
+            if not words:
+                break
+
+        ys = [439.5, 421.5]
+        for i, (x, line, width) in enumerate(lines[:2]):
+            clean_text(c, x, ys[i], line, width, size=7.1)
 
     def page1(c):
+        # TRAVAILLEUR / EMPLOYEUR
         _draw_niss(c, 92, 666, data.get("niss", ""))
         _draw_text(c, 250, 666, data.get("employee_name", ""), 8.0, 78)
         _draw_text(c, 92, 638, data.get("employer_name", ""), 7.8, 55)
@@ -1309,6 +1279,7 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_text(c, 449, 613, data.get("onss_number", ""), 7.8, 20)
         _draw_multiline(c, 28, 587, data.get("employer_address", ""), 7.8, 8.5, 112)
 
+        # PARTIE A - OCCUPATION
         _draw_date(c, 138, 555, data.get("occupation_start"), 7.8)
         _draw_date(c, 385, 555, data.get("service_start"), 7.8)
         _draw_date(c, 146, 533, data.get("occupation_end"), 7.8)
@@ -1338,72 +1309,122 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         if freq in freq_coords:
             _draw_check(c, *freq_coords[freq], True)
 
-        if data.get("exact_gross") is not None:
-            _draw_decimal(c, 235, 306, data.get("exact_gross"), 2, 8.0)
-            _draw_text(c, 396, 306, data.get("quarter_label", ""), 7.8, 12)
+        # SALAIRE BRUT EXACT - CORRIGÉ
+        exact_gross = data.get("exact_gross")
+        if exact_gross is not None:
+            clean_number(c, 117, 309.0, exact_gross, 86, decimals=2, size=8.0)
+            clean_text(c, 292, 309.0, data.get("quarter_label", ""), 79, size=7.7)
 
+        # VACANCES - CORRIGÉ
         vacation_type = data.get("vacation_type", "Temps partiel")
-        _draw_check(c, 49, 276, vacation_type == "Temps partiel")
-        _draw_check(c, 187, 276, vacation_type == "Temps plein")
-        _draw_decimal(c, 408, 276, data.get("vacation_amount"), 2, 7.6)
+        vacation_amount = float(data.get("vacation_amount", 0) or 0)
+        if vacation_type == "Temps plein":
+            _draw_box_x(c, 62.64, 250.22, 8.02, 9.99)
+            clean_number(c, 160, 251.0, vacation_amount, 33, decimals=1, size=7.7)
+        else:
+            _draw_box_x(c, 62.63, 238.82, 8.02, 9.99)
+            clean_number(c, 164, 239.6, vacation_amount, 33, decimals=1, size=7.7)
 
         public_regime = data.get("public_regime", "Non applicable")
-        _draw_check(c, 49, 247, public_regime == "Secteur public")
-        _draw_check(c, 187, 247, public_regime == "Secteur privé")
+        if public_regime == "Secteur public":
+            _draw_box_x(c, 389.04, 219.74, 8.02, 9.99)
+        elif public_regime == "Secteur privé":
+            _draw_box_x(c, 450.97, 219.74, 8.02, 9.99)
 
         holidays = data.get("paid_holidays_after_end", []) or []
-        for i, holiday in enumerate(holidays[:3]):
-            _draw_date(c, 105 + i * 112, 219, holiday, 7.2)
+        if holidays:
+            _draw_box_x(c, 71.88, 192.98, 8.02, 9.99)
+            holiday_xs = [103.5, 217.5, 331.5, 445.5]
+            for idx, holiday in enumerate(holidays[:4]):
+                clean_date(c, holiday_xs[idx], 195.6, holiday, width=47, size=6.8)
+        else:
+            _draw_box_x(c, 41.76, 192.98, 8.02, 9.99)
 
-        if data.get("comp_rest_days"):
-            _draw_decimal(c, 343, 194, data.get("comp_rest_days"), 1, 7.6)
+        comp_days = float(data.get("comp_rest_days", 0) or 0)
+        if comp_days > 0:
+            _draw_box_x(c, 270.48, 160.46, 8.02, 9.99)
+            clean_number(c, 314, 163.7, comp_days, 51, decimals=1, size=7.5)
+        else:
+            _draw_box_x(c, 242.52, 160.47, 8.02, 9.99)
 
-        rows = data.get("quarter_rows", []) or []
-        row_ys = [155, 132]
-        for row, y in zip(rows[:2], row_ys):
-            _draw_date(c, 57, y, row.get("start"), 7.0)
-            _draw_date(c, 170, y, row.get("end"), 7.0)
-            _draw_check(c, 315, y, bool(row.get("interruption")), 7.0)
-            _draw_check(c, 445, y, bool(row.get("q_diff")), 7.0)
+        # IMPORTANT : Partie B = page 2, jamais page 1.
 
     def page2(c):
         _draw_niss(c, 143, 809, data.get("niss", ""))
-        reason = data.get("end_reason", "")
-        end_date = data.get("occupation_end")
 
-        reason_coords = {
-            "Durée déterminée arrivée à terme": (31, 653),
-            "Travail déterminé arrivé à terme": (31, 632),
-            "Préavis par l'employeur": (31, 611),
-            "Rupture par l'employeur": (31, 590),
-            "Démission / abandon volontaire": (31, 569),
-            "Commun accord": (31, 548),
-            "Force majeure médicale": (31, 527),
-            "Force majeure autre": (31, 506),
+        # PARTIE B - CORRIGÉE
+        qtr_rows = data.get("quarter_rows", []) or []
+        row_layouts = [
+            {
+                "date_y": 709.0,
+                "int_non": (439.92, 708.26, 8.02, 9.99),
+                "int_oui": (489.48, 708.26, 8.02, 9.99),
+                "q_non": (439.92, 696.26, 8.02, 9.99),
+                "q_oui": (489.48, 696.26, 8.02, 9.99),
+            },
+            {
+                "date_y": 685.0,
+                "int_non": (439.92, 684.26, 8.02, 9.99),
+                "int_oui": (489.48, 684.26, 8.02, 9.99),
+                "q_non": (439.92, 672.26, 8.02, 9.99),
+                "q_oui": (489.48, 672.26, 8.02, 9.99),
+            },
+        ]
+
+        for idx, row in enumerate(qtr_rows[:2]):
+            lay = row_layouts[idx]
+            clean_date(c, 52, lay["date_y"], row.get("start"), width=111, size=7.2)
+            clean_date(c, 190, lay["date_y"], row.get("end"), width=111, size=7.2)
+            _draw_box_x(c, *(lay["int_oui"] if row.get("interruption", False) else lay["int_non"]))
+            _draw_box_x(c, *(lay["q_oui"] if row.get("q_diff", False) else lay["q_non"]))
+
+        # PARTIE C - FIN DE L'OCCUPATION - CORRIGÉE
+        reason = data.get("end_reason", "Durée déterminée arrivée à terme")
+        reason_boxes = {
+            "Préavis par l'employeur": (37.56, 603.26, 8.02, 9.99),
+            "Rupture par l'employeur": (37.58, 554.31, 8.02, 9.99),
+            "Démission / abandon volontaire": (37.59, 537.87, 8.02, 9.99),
+            "Commun accord": (37.58, 521.55, 8.02, 9.99),
+            "Force majeure médicale": (37.57, 505.24, 8.02, 9.99),
+            "Force majeure autre": (37.57, 488.92, 8.02, 9.99),
+            "Durée déterminée arrivée à terme": (37.57, 472.60, 8.02, 9.99),
+            "Travail déterminé arrivé à terme": (37.56, 456.29, 8.02, 9.99),
         }
-        if reason in reason_coords:
-            _draw_check(c, *reason_coords[reason], True)
+        if reason in reason_boxes:
+            _draw_box_x(c, *reason_boxes[reason])
 
-        if end_date:
-            _draw_date(c, 390, 653, end_date, 7.4)
-
+        end_date = data.get("occupation_end")
         if reason == "Préavis par l'employeur":
-            _draw_check(c, 174, 611, data.get("notice_method") == "Lettre recommandée")
-            _draw_check(c, 302, 611, data.get("notice_method") == "Exploit d'huissier")
-            _draw_date(c, 414, 611, data.get("notice_sent"), 7.2)
+            method = data.get("notice_method", "Lettre recommandée")
+            notice_sent = data.get("notice_sent")
+            if method == "Exploit d'huissier":
+                _draw_box_x(c, 58.81, 570.63, 8.02, 9.99)
+                clean_date(c, 170, 574.6, notice_sent, width=91, size=7.1)
+            else:
+                _draw_box_x(c, 58.80, 586.95, 8.02, 9.99)
+                clean_date(c, 185, 590.9, notice_sent, width=91, size=7.1)
+        elif reason == "Rupture par l'employeur":
+            clean_date(c, 160, 558.2, end_date, width=91, size=7.1)
+        elif reason == "Démission / abandon volontaire":
+            clean_date(c, 222, 541.8, end_date, width=91, size=7.1)
+        elif reason == "Commun accord":
+            clean_date(c, 240, 525.5, end_date, width=91, size=7.1)
+        elif reason == "Force majeure autre":
+            clean_date(c, 227, 492.9, end_date, width=91, size=7.1)
 
-        _draw_multiline(c, 173, 441, data.get("precise_reason", ""), 7.2, 9.0, 90)
+        # Pour les points 5, 7 et 8, aucune date n'est imprimée sur la ligne.
+        draw_precise_reason(c, data.get("precise_reason", ""))
 
         indemnity_type = data.get("indemnity_type", "Aucune")
         if indemnity_type == "Salaire pendant le délai de préavis":
-            _draw_check(c, 32, 358, True)
-            _draw_check(c, 68, 309, True)
-            _draw_date(c, 181, 309, data.get("indemnity_start"), 7.2)
-            _draw_date(c, 347, 309, data.get("indemnity_end"), 7.2)
+            _draw_box_x(c, 32.28, 357.86, 8.02, 9.99)
+            clean_date(c, 168, 343.4, data.get("indemnity_start"), width=91, size=7.1)
+            clean_date(c, 268, 343.4, data.get("indemnity_end"), width=91, size=7.1)
 
     def page3(c):
         _draw_niss(c, 143, 809, data.get("niss", ""))
         indemnity_type = data.get("indemnity_type", "Aucune")
+
         if indemnity_type == "Indemnité de congé / rupture":
             _draw_check(c, 40, 778, True)
             _draw_check(c, 65, 753, True)
@@ -1416,10 +1437,12 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
             _draw_date(c, 190, 291, data.get("indemnity_start"), 7.2)
             _draw_date(c, 335, 291, data.get("indemnity_end"), 7.2)
             _draw_decimal(c, 175, 272, data.get("other_indemnity_amount"), 2, 7.2)
+
         _draw_multiline(c, 28, 207, data.get("remarks", ""), 7.2, 9.0, 110)
 
     def page4(c):
         _draw_niss(c, 143, 809, data.get("niss", ""))
+
         pact = data.get("pact_generations", "Non concerné / ne pas compléter")
         if pact == "Non concerné / ne pas compléter":
             _draw_check(c, 27, 765, True)
@@ -1438,6 +1461,7 @@ def generate_c4_classique_pdf(data: dict, template_pdf: bytes) -> bytes:
         _draw_text(c, 199, 542, data.get("responsible_name", ""), 7.8, 72)
 
     return _merge_overlays(template_pdf, {0: page1, 1: page2, 2: page3, 3: page4})
+
 
 # ============================================================
 # AIDES INTERFACE
@@ -1517,6 +1541,51 @@ def _render_fase_block(prefix: str) -> tuple[str, Optional[dict], str, str]:
     return fase, fase_record, establishment_name, establishment_address
 
 
+def _parse_holiday_list(text: str) -> tuple[list[date], list[str]]:
+    dates: list[date] = []
+    errors: list[str] = []
+    for chunk in [x.strip() for x in (text or "").split(",") if x.strip()]:
+        d, err = _parse_user_date(chunk)
+        if d:
+            dates.append(d)
+        if err:
+            errors.append(chunk)
+    return dates, errors
+
+
+def _render_indemnity_block(prefix: str):
+    indemnity_type = st.selectbox(
+        "Une indemnité a-t-elle été payée ?",
+        ["Aucune", "Salaire pendant le délai de préavis", "Indemnité de congé / rupture", "Autre indemnité"],
+        key=f"{prefix}_indemnity_type",
+    )
+
+    indemnity_start = indemnity_end = None
+    other_indemnity_name = ""
+    other_indemnity_amount = 0.0
+
+    if indemnity_type != "Aucune":
+        c1, c2 = st.columns(2)
+        with c1:
+            ind_start_txt = _masked_date_input("Période couverte - du", key=f"{prefix}_ind_start")
+        with c2:
+            ind_end_txt = _masked_date_input("Période couverte - au", key=f"{prefix}_ind_end")
+        indemnity_start, _ = _parse_user_date(ind_start_txt)
+        indemnity_end, _ = _parse_user_date(ind_end_txt)
+
+        if indemnity_type == "Autre indemnité":
+            other_indemnity_name = st.text_input("Nature de l'autre indemnité", key=f"{prefix}_other_ind_name")
+            other_indemnity_amount = st.number_input(
+                "Montant de l'autre indemnité",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                key=f"{prefix}_other_ind_amount",
+            )
+
+    return indemnity_type, indemnity_start, indemnity_end, other_indemnity_name, other_indemnity_amount
+
+
 # ============================================================
 # INTERFACE C4 CLASSIQUE - MANUEL
 # ============================================================
@@ -1536,17 +1605,15 @@ def render_c4_classique_manuel():
         entries, extraction_errors = extract_payroll_entries(uploaded_files)
         for error in extraction_errors:
             st.warning(error)
+        if entries:
+            _show_detected_entries(entries)
 
     base_entry = entries[0] if entries else PayrollEntry("", 0, "")
 
     st.subheader("3. Travailleur et employeur")
     c1, c2 = st.columns(2)
     with c1:
-        employee_name = st.text_input(
-            "Nom et prénom",
-            value=base_entry.employee_name,
-            key="c4c_employee_name",
-        )
+        employee_name = st.text_input("Nom et prénom", value=base_entry.employee_name, key="c4c_employee_name")
         niss = st.text_input("NISS", key="c4c_niss")
     with c2:
         employer_name = st.text_input("Employeur / Pouvoir organisateur", key="c4c_employer_name")
@@ -1577,29 +1644,29 @@ def render_c4_classique_manuel():
     service_start, e2 = _parse_user_date(service_start_txt)
     occupation_end, e3 = _parse_user_date(occupation_end_txt)
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        q = st.number_input("Q", min_value=0.0, value=float(base_entry.q or 0), step=0.01, key="c4c_q")
-    with c2:
-        s = st.number_input("S", min_value=0.0, value=float(base_entry.s or 0), step=0.01, key="c4c_s")
-    with c3:
-        theoretical_salary = st.number_input(
-            "Salaire brut moyen théorique",
-            min_value=0.0,
-            value=float(base_entry.gross or 0),
-            step=0.01,
-            key="c4c_theoretical_salary",
-        )
-
-    salary_frequency = st.selectbox(
-        "Périodicité du salaire brut moyen théorique",
-        ["par mois", "par heure", "par jour", "par semaine", "par trimestre", "par année"],
-        key="c4c_salary_frequency",
-    )
     onss_case = st.selectbox(
         "Cotisations ONSS - secteur chômage",
         ["Prélevées", "Non prélevées et non versées", "Non retenues mais seront versées", "Statutaire art. 9"],
         key="c4c_onss_case",
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        q = st.number_input("Q", min_value=0.0, value=float(base_entry.q or 0.0), step=0.01, key="c4c_q")
+    with c2:
+        s = st.number_input("S", min_value=0.0, value=float(base_entry.s or 0.0), step=0.01, key="c4c_s")
+
+    theoretical_salary = st.number_input(
+        "Salaire brut moyen théorique",
+        min_value=0.0,
+        value=float(base_entry.gross or 0.0),
+        step=0.01,
+        key="c4c_theoretical_salary",
+    )
+    salary_frequency = st.selectbox(
+        "Périodicité du salaire",
+        ["par mois", "par heure", "par jour", "par semaine", "par trimestre", "par année"],
+        key="c4c_salary_frequency",
     )
 
     exact_gross: Optional[float] = None
@@ -1607,48 +1674,32 @@ def render_c4_classique_manuel():
     quarter_rows: list[dict] = []
 
     if occupation_end:
-        _, q_start, q_end, quarter_label = quarter_info(occupation_end)
-        st.markdown(f"**Trimestre de la fin d'occupation : {quarter_label}**")
-        dmfa = st.radio(
-            "La déclaration DmfA de ce trimestre est-elle déjà déclarée et acceptée ?",
-            ["Non", "Oui"],
+        _, quarter_start, quarter_end, quarter_label = quarter_info(occupation_end)
+        dmfa_accepted = st.radio(
+            "La DmfA de ce trimestre est-elle déjà déclarée et acceptée ?",
+            ["Oui", "Non"],
+            index=1,
             horizontal=True,
             key="c4c_dmfa_accepted",
         )
-        if dmfa == "Non":
-            if salary_frequency != "par mois":
-                st.warning(
-                    "Le calcul automatique par règle de trois est prévu pour un salaire mensuel. "
-                    "Sélectionnez « par mois » ou vérifiez manuellement le calcul."
-                )
-            elif not occupation_start:
-                st.warning("Indiquez la date de début pour calculer le salaire brut exact.")
-            elif theoretical_salary <= 0:
-                st.warning("Le salaire mensuel doit être supérieur à 0.")
-            else:
-                exact_gross = _show_exact_gross_calculation(
-                    theoretical_salary,
-                    occupation_start,
-                    occupation_end,
-                    quarter_label,
-                )
-                quarter_rows = [
-                    {
-                        "start": max(q_start, occupation_start),
-                        "end": min(q_end, occupation_end),
-                        "interruption": False,
-                        "q_diff": False,
-                    }
-                ]
-        else:
-            st.caption("Le salaire brut exact n'est pas complété pour un trimestre déjà accepté.")
+        if dmfa_accepted == "Non":
+            exact_gross = st.number_input(
+                "Salaire brut exact du trimestre",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                key="c4c_exact_gross",
+            )
+            qrow_start = max(quarter_start, occupation_start) if occupation_start else quarter_start
+            qrow_end = min(quarter_end, occupation_end)
+            quarter_rows = [{
+                "start": qrow_start,
+                "end": qrow_end,
+                "interruption": st.checkbox("Interruption pendant le trimestre", key="c4c_qrow_interruption"),
+                "q_diff": st.checkbox("Durée de travail différente de Q", key="c4c_qrow_qdiff"),
+            }]
 
-    vacation_type = st.radio(
-        "Vacances légales",
-        ["Temps partiel", "Temps plein"],
-        horizontal=True,
-        key="c4c_vacation_type",
-    )
+    vacation_type = st.radio("Vacances légales", ["Temps partiel", "Temps plein"], horizontal=True, key="c4c_vacation_type")
     vacation_amount = st.number_input(
         "Nombre d'heures (temps partiel) ou de jours (temps plein) de vacances rémunérées",
         min_value=0.0,
@@ -1661,20 +1712,11 @@ def render_c4_classique_manuel():
         ["Non applicable", "Secteur public", "Secteur privé"],
         key="c4c_public_regime",
     )
-
     holidays_text = st.text_input(
         "Jours fériés payés après la fin du contrat (séparés par des virgules, JJ/MM/AAAA)",
         key="c4c_holidays",
     )
-    paid_holidays_after_end: list[date] = []
-    holiday_errors: list[str] = []
-    for chunk in [x.strip() for x in holidays_text.split(",") if x.strip()]:
-        d, err = _parse_user_date(chunk)
-        if d:
-            paid_holidays_after_end.append(d)
-        if err:
-            holiday_errors.append(chunk)
-
+    paid_holidays_after_end, holiday_errors = _parse_holiday_list(holidays_text)
     comp_rest_days = st.number_input(
         "Jours encore rémunérés après la fin pour repos compensatoire / heures supplémentaires",
         min_value=0.0,
@@ -1682,19 +1724,6 @@ def render_c4_classique_manuel():
         step=0.5,
         key="c4c_comp_rest",
     )
-
-    if quarter_rows and st.session_state.get("c4c_dmfa_accepted") == "Non":
-        c1, c2 = st.columns(2)
-        with c1:
-            quarter_rows[0]["interruption"] = st.checkbox(
-                "Interruption à déclarer pendant le trimestre",
-                key="c4c_qrow_interruption",
-            )
-        with c2:
-            quarter_rows[0]["q_diff"] = st.checkbox(
-                "Durée de travail différente de Q pendant une partie du trimestre",
-                key="c4c_qrow_qdiff",
-            )
 
     st.subheader("5. Fin de l'occupation")
     end_reason = st.selectbox(
@@ -1725,42 +1754,12 @@ def render_c4_classique_manuel():
         notice_sent_txt = _masked_date_input("Date d'envoi / notification", key="c4c_notice_sent")
         notice_sent, _ = _parse_user_date(notice_sent_txt)
 
-    st.subheader("6. Indemnité liée à la fin")
-    indemnity_type = st.selectbox(
-        "Une indemnité a-t-elle été payée ?",
-        ["Aucune", "Salaire pendant le délai de préavis", "Indemnité de congé / rupture", "Autre indemnité"],
-        key="c4c_indemnity_type",
-    )
-    indemnity_start = indemnity_end = None
-    other_indemnity_name = ""
-    other_indemnity_amount = 0.0
-    if indemnity_type != "Aucune":
-        c1, c2 = st.columns(2)
-        with c1:
-            ind_start_txt = _masked_date_input("Période couverte - du", key="c4c_ind_start")
-        with c2:
-            ind_end_txt = _masked_date_input("Période couverte - au", key="c4c_ind_end")
-        indemnity_start, _ = _parse_user_date(ind_start_txt)
-        indemnity_end, _ = _parse_user_date(ind_end_txt)
-        if indemnity_type == "Autre indemnité":
-            other_indemnity_name = st.text_input("Nature de l'autre indemnité", key="c4c_other_ind_name")
-            other_indemnity_amount = st.number_input(
-                "Montant de l'autre indemnité",
-                min_value=0.0,
-                value=0.0,
-                step=0.01,
-                key="c4c_other_ind_amount",
-            )
-
+    st.subheader("6. Indemnités et déclaration")
+    indemnity_type, indemnity_start, indemnity_end, other_indemnity_name, other_indemnity_amount = _render_indemnity_block("c4c")
     remarks = st.text_area("Remarques", key="c4c_remarks")
     pact_generations = st.selectbox(
         "Pacte des générations",
-        [
-            "Non concerné / ne pas compléter",
-            "Licenciement - cellule emploi créée",
-            "Licenciement - pas de cellule emploi",
-            "Pas un licenciement",
-        ],
+        ["Non concerné / ne pas compléter", "Licenciement - cellule emploi créée", "Licenciement - pas de cellule emploi", "Pas un licenciement"],
         key="c4c_pact",
     )
     complementary_indemnity = st.radio(
@@ -1770,12 +1769,7 @@ def render_c4_classique_manuel():
         key="c4c_compl_ind",
     )
     responsible_name = st.text_input("Nom du responsable / délégué qui signera le C4", key="c4c_responsible")
-    declaration_date = st.date_input(
-        "Date de la déclaration",
-        value=date.today(),
-        format="DD/MM/YYYY",
-        key="c4c_decl_date",
-    )
+    declaration_date = st.date_input("Date de la déclaration", value=date.today(), format="DD/MM/YYYY", key="c4c_decl_date")
 
     errors: list[str] = []
     if e1:
@@ -1794,13 +1788,6 @@ def render_c4_classique_manuel():
         errors.append("Une ou plusieurs dates de jours fériés sont invalides.")
     if not responsible_name.strip():
         errors.append("Nom du responsable / délégué manquant.")
-    if (
-        occupation_end
-        and st.session_state.get("c4c_dmfa_accepted") == "Non"
-        and salary_frequency == "par mois"
-        and (exact_gross is None or exact_gross <= 0)
-    ):
-        errors.append("Salaire brut exact du trimestre impossible à calculer.")
 
     for error in errors:
         st.warning(error)
@@ -1862,12 +1849,7 @@ def render_c4_classique_manuel():
         "declaration_date": declaration_date,
     }
 
-    try:
-        pdf_bytes = generate_c4_classique_pdf(data, template_pdf)
-    except Exception as exc:
-        st.error(f"La génération du PDF a échoué : {exc}")
-        return
-
+    pdf_bytes = generate_c4_classique_pdf(data, template_pdf)
     st.success("Le C4 classique est prêt à imprimer.")
     st.download_button(
         "Télécharger le C4 classique prêt à imprimer",
@@ -1876,6 +1858,7 @@ def render_c4_classique_manuel():
         mime="application/pdf",
         use_container_width=True,
     )
+
 
 # ============================================================
 # INTERFACE C4 CLASSIQUE - ACS / APE / PART-APE / PTP
@@ -1888,9 +1871,6 @@ def render_c4_classique_acs_ape():
         "La fiche de paie sert à préremplir les données de rémunération."
     )
 
-    # --------------------------------------------------------
-    # 2. FICHES DE PAIE
-    # --------------------------------------------------------
     st.subheader("2. Fiches de paie")
     uploaded_files = st.file_uploader(
         "Importer une ou plusieurs fiches de paie PDF",
@@ -1915,11 +1895,7 @@ def render_c4_classique_acs_ape():
 
     entry_options = [_entry_label(e) for e in entries]
     entry_map = {_entry_label(e): e for e in entries}
-    source_label = st.selectbox(
-        "Fiche de paie utilisée comme base",
-        options=entry_options,
-        key="c4_acs_source",
-    )
+    source_label = st.selectbox("Fiche de paie utilisée comme base", options=entry_options, key="c4_acs_source")
     source_entry = entry_map[source_label]
 
     source_signature = f"{source_entry.file_name}|{source_entry.page_number}|{source_entry.employee_name}"
@@ -1928,9 +1904,6 @@ def render_c4_classique_acs_ape():
         st.session_state["c4_acs_employee_name"] = source_entry.employee_name
         st.session_state["c4_acs_employee_address"] = source_entry.employee_address
 
-    # --------------------------------------------------------
-    # 3. PROGRAMME ET FONCTION
-    # --------------------------------------------------------
     st.subheader("3. Programme et fonction")
     programme_options = ["ACS", "APE", "PART-APE", "PTP"]
     detected_program = _detect_acs_program(source_entry)
@@ -1943,11 +1916,7 @@ def render_c4_classique_acs_ape():
             st.session_state["c4_acs_programme"] = "APE"
 
     programme = st.selectbox("Type de programme", programme_options, key="c4_acs_programme")
-    fonction_option = st.selectbox(
-        "Fonction",
-        options=FONCTIONS_ACS_APE_OPTIONS,
-        key="c4_acs_fonction",
-    )
+    fonction_option = st.selectbox("Fonction", options=FONCTIONS_ACS_APE_OPTIONS, key="c4_acs_fonction")
     fonction_acs = _acs_ape_function_label(fonction_option)
 
     if fonction_acs == "Puériculteur(trice) PTP":
@@ -1963,13 +1932,8 @@ def render_c4_classique_acs_ape():
         st.caption("Mesure de promotion de l'emploi : code 2 (PTP), complété automatiquement.")
     else:
         employment_measure = ""
-        st.caption(
-            "Pour ACS / APE / PART-APE, le champ « mesure de promotion de l'emploi » reste vide."
-        )
+        st.caption("Pour ACS / APE / PART-APE, le champ « mesure de promotion de l'emploi » reste vide.")
 
-    # --------------------------------------------------------
-    # 4. TRAVAILLEUR / EMPLOYEUR
-    # --------------------------------------------------------
     st.subheader("4. Travailleur et employeur")
     col1, col2 = st.columns(2)
     with col1:
@@ -1979,12 +1943,12 @@ def render_c4_classique_acs_ape():
             key="c4_acs_niss",
             help="Le matricule figurant sur la fiche de paie n'est pas utilisé comme NISS.",
         )
-        employee_address = st.text_area(
+        st.text_area(
             "Adresse du membre du personnel (contrôle)",
             key="c4_acs_employee_address",
             height=85,
+            disabled=True,
         )
-
     with col2:
         fase, fase_record, establishment_name, establishment_address = _render_fase_block("c4_acs")
 
@@ -1995,29 +1959,15 @@ def render_c4_classique_acs_ape():
 
     employer_identity_mode = st.radio(
         "Identification de l'employeur réel",
-        [
-            "Utiliser l'établissement identifié par le FASE",
-            "Encoder un pouvoir organisateur / autre employeur",
-        ],
+        ["Utiliser l'établissement identifié par le FASE", "Encoder un pouvoir organisateur / autre employeur"],
         key="c4_acs_employer_identity_mode",
     )
 
     if employer_identity_mode == "Utiliser l'établissement identifié par le FASE":
         employer_name = establishment_name
         employer_address = establishment_address
-        st.text_input(
-            "Nom / raison sociale de l'employeur",
-            value=employer_name,
-            disabled=True,
-            key="c4_acs_employer_name_display",
-        )
-        st.text_area(
-            "Adresse de l'employeur",
-            value=employer_address,
-            disabled=True,
-            height=85,
-            key="c4_acs_employer_address_display",
-        )
+        st.text_input("Nom / raison sociale de l'employeur", value=employer_name, disabled=True, key="c4_acs_employer_name_display")
+        st.text_area("Adresse de l'employeur", value=employer_address, disabled=True, height=85, key="c4_acs_employer_address_display")
     else:
         employer_name = st.text_input("Nom / raison sociale de l'employeur réel", key="c4_acs_employer_name")
         employer_address = st.text_area("Adresse de l'employeur réel", key="c4_acs_employer_address", height=85)
@@ -2025,26 +1975,13 @@ def render_c4_classique_acs_ape():
     c1, c2 = st.columns(2)
     with c1:
         enterprise_number = BCE_FWB_ACS_APE
-        st.text_input(
-            "N° unique d'entreprise (FWB)",
-            value=enterprise_number,
-            disabled=True,
-            key="c4_acs_bce_display",
-        )
+        st.text_input("N° unique d'entreprise (FWB)", value=enterprise_number, disabled=True, key="c4_acs_bce_display")
         employer_category = st.text_input("Catégorie employeur", key="c4_acs_employer_category")
     with c2:
         onss_number = ONSS_EMPLOYEUR_ACS_APE
-        st.text_input(
-            "N° ONSS employeur",
-            value=onss_number,
-            disabled=True,
-            key="c4_acs_onss_number_display",
-        )
+        st.text_input("N° ONSS employeur", value=onss_number, disabled=True, key="c4_acs_onss_number_display")
         joint_committee = st.text_input("Commission paritaire", key="c4_acs_joint_committee")
 
-    # --------------------------------------------------------
-    # 5. OCCUPATION
-    # --------------------------------------------------------
     st.subheader("5. Données concernant l'occupation")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -2062,12 +1999,7 @@ def render_c4_classique_acs_ape():
         )
         status = "D" if home_worker else ""
         st.text_input("Statut à reporter", value=status, disabled=True, key="c4_acs_status_display")
-        st.text_input(
-            "Mesure de promotion de l'emploi",
-            value=employment_measure,
-            disabled=True,
-            key="c4_acs_employment_measure_display",
-        )
+        st.text_input("Mesure de promotion de l'emploi", value=employment_measure, disabled=True, key="c4_acs_employment_measure_display")
 
     occupation_start, e1 = _parse_user_date(occupation_start_txt)
     service_start, e2 = _parse_user_date(service_start_txt)
@@ -2101,18 +2033,10 @@ def render_c4_classique_acs_ape():
         key="c4_acs_onss_case",
     )
 
-    # --------------------------------------------------------
-    # 6. REMUNERATION
-    # --------------------------------------------------------
     st.subheader("6. Rémunération")
     monthly_fr = reconstruct_monthly_fr(source_entry)
     calculated_theoretical = None
-    if (
-        source_entry.annual_base_salary is not None
-        and source_entry.pdf_index is not None
-        and q > 0
-        and s > 0
-    ):
+    if source_entry.annual_base_salary is not None and source_entry.pdf_index is not None and q > 0 and s > 0:
         calculated_theoretical = calculate_monthly_indexed_salary(
             annual_base_salary=source_entry.annual_base_salary,
             q=q,
@@ -2125,24 +2049,15 @@ def render_c4_classique_acs_ape():
     with c1:
         st.metric("TAB détecté", _format_money(source_entry.annual_base_salary))
     with c2:
-        st.metric(
-            "Index détecté",
-            f"{source_entry.pdf_index:.4f}".replace(".", ",") if source_entry.pdf_index else "—",
-        )
+        st.metric("Index détecté", f"{source_entry.pdf_index:.4f}".replace(".", ",") if source_entry.pdf_index else "—")
     with c3:
         st.metric("Allocation F/R mensuelle", _format_money(monthly_fr))
 
     if calculated_theoretical is not None:
-        st.success(
-            "Salaire brut moyen théorique calculé automatiquement : "
-            f"{_format_money(calculated_theoretical)} / mois"
-        )
+        st.success("Salaire brut moyen théorique calculé automatiquement : " f"{_format_money(calculated_theoretical)} / mois")
         st.caption("Calcul : TAB × Q/S × index ÷ 12 + allocation foyer/résidence éventuelle.")
     else:
-        st.warning(
-            "Le TAB, l'index ou la fraction Q/S n'a pas pu être déterminé complètement. "
-            "Encodez le salaire brut moyen théorique manuellement."
-        )
+        st.warning("Le TAB, l'index ou la fraction Q/S n'a pas pu être déterminé complètement. Encodez le salaire manuellement.")
 
     use_auto_salary = st.checkbox(
         "Utiliser le salaire calculé automatiquement",
@@ -2174,7 +2089,7 @@ def render_c4_classique_acs_ape():
     salary_frequency = "par mois"
     st.text_input("Périodicité", value="par mois", disabled=True, key="c4_acs_salary_frequency_display")
 
-    # SALAIRE BRUT EXACT : AUTOMATIQUE PAR REGLE DE TROIS
+    # SALAIRE BRUT EXACT - RÈGLE DE TROIS
     exact_gross: Optional[float] = None
     quarter_label = ""
     quarter_rows: list[dict] = []
@@ -2205,22 +2120,20 @@ def render_c4_classique_acs_ape():
 
             qrow_start = max(quarter_start, occupation_start) if occupation_start else quarter_start
             qrow_end = min(quarter_end, occupation_end)
-            has_interruption = st.checkbox(
-                "Il y a eu une interruption à déclarer pendant ce trimestre",
-                value=False,
-                key="c4_acs_qrow_interruption",
-            )
-            q_changed = st.checkbox(
-                "La durée de travail diffère de Q pendant une partie du trimestre",
-                value=False,
-                key="c4_acs_qrow_qdiff",
-            )
             quarter_rows = [
                 {
                     "start": qrow_start,
                     "end": qrow_end,
-                    "interruption": has_interruption,
-                    "q_diff": q_changed,
+                    "interruption": st.checkbox(
+                        "Il y a eu une interruption à déclarer pendant ce trimestre",
+                        value=False,
+                        key="c4_acs_qrow_interruption",
+                    ),
+                    "q_diff": st.checkbox(
+                        "La durée de travail diffère de Q pendant une partie du trimestre",
+                        value=False,
+                        key="c4_acs_qrow_qdiff",
+                    ),
                 }
             ]
         else:
@@ -2228,9 +2141,6 @@ def render_c4_classique_acs_ape():
     else:
         st.caption("Complétez la date de fin pour déterminer le trimestre ONSS.")
 
-    # --------------------------------------------------------
-    # 7. VACANCES / JOURS FERIES / REPOS
-    # --------------------------------------------------------
     st.subheader("7. Vacances et jours encore rémunérés")
     default_vacation_type = "Temps plein" if abs(q - s) < 0.001 else "Temps partiel"
     vacation_type = st.radio(
@@ -2268,14 +2178,7 @@ def render_c4_classique_acs_ape():
         "Jours fériés payés après la fin du contrat (séparés par des virgules, JJ/MM/AAAA)",
         key="c4_acs_holidays",
     )
-    paid_holidays_after_end: list[date] = []
-    holiday_errors: list[str] = []
-    for chunk in [x.strip() for x in holidays_text.split(",") if x.strip()]:
-        d, err = _parse_user_date(chunk)
-        if d:
-            paid_holidays_after_end.append(d)
-        if err:
-            holiday_errors.append(chunk)
+    paid_holidays_after_end, holiday_errors = _parse_holiday_list(holidays_text)
 
     comp_rest_days = st.number_input(
         "Jours encore rémunérés après la fin pour repos compensatoire / heures supplémentaires",
@@ -2285,9 +2188,6 @@ def render_c4_classique_acs_ape():
         key="c4_acs_comp_rest",
     )
 
-    # --------------------------------------------------------
-    # 8. FIN DU CONTRAT
-    # --------------------------------------------------------
     st.subheader("8. Fin de l'occupation")
     end_reason = st.selectbox(
         "Comment le contrat a-t-il pris fin ?",
@@ -2303,22 +2203,7 @@ def render_c4_classique_acs_ape():
         ],
         key="c4_acs_end_reason",
     )
-
-    precise_reason_default = ""
-    if end_reason == "Préavis par l'employeur":
-        precise_reason_default = "Fin de l'occupation à l'initiative de l'employeur avec préavis"
-    elif end_reason == "Rupture par l'employeur":
-        precise_reason_default = "Fin de l'occupation à l'initiative de l'employeur"
-    elif end_reason == "Commun accord":
-        precise_reason_default = "Fin de l'occupation de commun accord"
-    elif end_reason.startswith("Force majeure"):
-        precise_reason_default = "Fin de l'occupation pour force majeure"
-
-    precise_reason = st.text_area(
-        "Motif précis du chômage",
-        value=precise_reason_default,
-        key="c4_acs_precise_reason",
-    )
+    precise_reason = st.text_area("Motif précis du chômage (si requis)", key="c4_acs_precise_reason")
 
     notice_method = "Lettre recommandée"
     notice_sent = None
@@ -2333,46 +2218,13 @@ def render_c4_classique_acs_ape():
         notice_sent, _ = _parse_user_date(notice_sent_txt)
 
     st.subheader("9. Indemnité liée à la fin")
-    indemnity_type = st.selectbox(
-        "Une indemnité a-t-elle été payée ?",
-        ["Aucune", "Salaire pendant le délai de préavis", "Indemnité de congé / rupture", "Autre indemnité"],
-        key="c4_acs_indemnity_type",
-    )
-    indemnity_start = indemnity_end = None
-    other_indemnity_name = ""
-    other_indemnity_amount = 0.0
-    if indemnity_type != "Aucune":
-        c1, c2 = st.columns(2)
-        with c1:
-            ind_start_txt = _masked_date_input("Période couverte - du", key="c4_acs_ind_start")
-        with c2:
-            ind_end_txt = _masked_date_input("Période couverte - au", key="c4_acs_ind_end")
-        indemnity_start, _ = _parse_user_date(ind_start_txt)
-        indemnity_end, _ = _parse_user_date(ind_end_txt)
-        if indemnity_type == "Autre indemnité":
-            other_indemnity_name = st.text_input("Nature de l'autre indemnité", key="c4_acs_other_ind_name")
-            other_indemnity_amount = st.number_input(
-                "Montant de l'autre indemnité",
-                min_value=0.0,
-                value=0.0,
-                step=0.01,
-                key="c4_acs_other_ind_amount",
-            )
-
+    indemnity_type, indemnity_start, indemnity_end, other_indemnity_name, other_indemnity_amount = _render_indemnity_block("c4_acs")
     remarks = st.text_area("Remarques", key="c4_acs_remarks")
 
-    # --------------------------------------------------------
-    # 10. SIGNATURE / GENERATION
-    # --------------------------------------------------------
     st.subheader("10. C4 classique prêt à imprimer")
     pact_generations = st.selectbox(
         "Pacte des générations",
-        [
-            "Non concerné / ne pas compléter",
-            "Licenciement - cellule emploi créée",
-            "Licenciement - pas de cellule emploi",
-            "Pas un licenciement",
-        ],
+        ["Non concerné / ne pas compléter", "Licenciement - cellule emploi créée", "Licenciement - pas de cellule emploi", "Pas un licenciement"],
         key="c4_acs_pact",
     )
     complementary_indemnity = st.radio(
@@ -2382,12 +2234,7 @@ def render_c4_classique_acs_ape():
         key="c4_acs_compl_ind",
     )
     responsible_name = st.text_input("Nom du responsable / délégué qui signera le C4", key="c4_acs_responsible")
-    declaration_date = st.date_input(
-        "Date de la déclaration",
-        value=date.today(),
-        format="DD/MM/YYYY",
-        key="c4_acs_decl_date",
-    )
+    declaration_date = st.date_input("Date de la déclaration", value=date.today(), format="DD/MM/YYYY", key="c4_acs_decl_date")
 
     errors: list[str] = []
     if e1:
@@ -2402,6 +2249,8 @@ def render_c4_classique_acs_ape():
         errors.append("Nom et prénom manquants.")
     if not niss.strip():
         errors.append("NISS manquant.")
+    elif len(re.sub(r"\D", "", niss)) != 11:
+        errors.append("Le NISS doit contenir 11 chiffres.")
     if not employer_name.strip():
         errors.append("Employeur manquant.")
     if not employer_address.strip():
@@ -2496,6 +2345,7 @@ def render_c4_classique_acs_ape():
         use_container_width=True,
     )
 
+
 # ============================================================
 # INTERFACE PRINCIPALE C4 ASSISTANT
 # ============================================================
@@ -2515,9 +2365,6 @@ def render_c4_assistant():
         "Elles doivent être introduites séparément."
     )
 
-    # --------------------------------------------------------
-    # 1. AIGUILLAGE
-    # --------------------------------------------------------
     st.subheader("1. Type de C4")
     personnel_type = st.selectbox(
         "Quelle est la situation du membre du personnel ?",
@@ -2544,7 +2391,7 @@ def render_c4_assistant():
         return
 
     # --------------------------------------------------------
-    # 2. IMPORT DES FICHES DE PAIE
+    # C4-ENSEIGNEMENT
     # --------------------------------------------------------
     st.subheader("2. Fiches de paie")
     uploaded_files = st.file_uploader(
@@ -2555,27 +2402,18 @@ def render_c4_assistant():
     )
     st.caption("Le module lit les PDF pour effectuer les calculs mais ne les enregistre pas dans le dépôt GitHub.")
 
-    entries: list[PayrollEntry] = []
-    extraction_errors: list[str] = []
-    if uploaded_files:
-        entries, extraction_errors = extract_payroll_entries(uploaded_files)
+    if not uploaded_files:
+        st.info("Importez au moins une fiche de paie PDF.")
+        return
 
+    entries, extraction_errors = extract_payroll_entries(uploaded_files)
     for error in extraction_errors:
         st.warning(error)
-
     if not entries:
-        st.info(
-            "Importez au moins une fiche de paie PDF. L'index est récupéré directement sur la fiche "
-            "et n'est plus saisi manuellement."
-        )
+        st.error("Aucune donnée exploitable n'a pu être extraite.")
         return
 
     _show_detected_entries(entries)
-
-    # --------------------------------------------------------
-    # 3. IDENTITE ET ETABLISSEMENT
-    # --------------------------------------------------------
-    st.subheader("3. Identité et établissement")
     base_entry = entries[0]
 
     if "c4_employee_name" not in st.session_state:
@@ -2583,417 +2421,98 @@ def render_c4_assistant():
     if "c4_employee_address" not in st.session_state:
         st.session_state["c4_employee_address"] = base_entry.employee_address
 
+    st.subheader("3. Identité et établissement")
     col1, col2 = st.columns(2)
     with col1:
         employee_name = st.text_input("Nom et prénom", key="c4_employee_name")
-        niss = st.text_input(
-            "NISS",
-            value="",
-            key="c4_niss",
-            help="Le matricule figurant sur la fiche de paie n'est pas utilisé comme NISS.",
-        )
-        employee_address = st.text_area(
-            "Adresse du MDP",
-            key="c4_employee_address",
-            height=90,
-        )
-
+        niss = st.text_input("NISS", key="c4_niss", help="Le matricule de la fiche de paie n'est pas le NISS.")
+        employee_address = st.text_area("Adresse du MDP", key="c4_employee_address", height=90)
     with col2:
         fase, fase_record, establishment_name, establishment_address = _render_fase_block("c4")
 
-    detected_indexes = sorted({round(e.pdf_index, 4) for e in entries if e.pdf_index is not None})
-    if detected_indexes:
-        st.info(
-            "Index détecté automatiquement sur les fiches de paie : "
-            + ", ".join(f"{x:.4f}".replace(".", ",") for x in detected_indexes)
-        )
-    else:
-        st.warning(
-            "Aucun index n'a pu être extrait des fiches de paie. "
-            "Le salaire mensuel brut indexé ne pourra pas être calculé."
-        )
-
-    # --------------------------------------------------------
-    # 4. OCCUPATIONS TERMINEES
-    # --------------------------------------------------------
     st.subheader("4. Occupation(s) terminée(s)")
-    st.caption(
-        "Le formulaire C4-Enseignement prévoit jusqu'à trois cadres d'occupation. "
-        "Ne renseignez pas une mission qui est toujours en cours."
-    )
+    occupation_count = int(st.number_input("Nombre d'occupations terminées à reprendre", min_value=1, max_value=3, value=1, step=1, key="c4_occ_count"))
 
-    occupation_count = int(
-        st.number_input(
-            "Nombre d'occupations terminées à reprendre",
-            min_value=1,
-            max_value=3,
-            value=1,
-            step=1,
-            key="c4_occupation_count",
-        )
-    )
-
-    entry_options = [_entry_label(e) for e in entries]
-    entry_map = {_entry_label(e): e for e in entries}
     occupation_results: list[dict] = []
     global_errors: list[str] = []
+    entry_options = [_entry_label(e) for e in entries]
+    entry_map = {_entry_label(e): e for e in entries}
 
-    for occ_index in range(1, occupation_count + 1):
-        prefix = f"c4_occ_{occ_index}"
-        st.markdown(f"### Occupation {occ_index}")
+    for i in range(1, occupation_count + 1):
+        st.markdown(f"### Occupation {i}")
+        prefix = f"c4_occ_{i}"
+        source_label = st.selectbox("Fiche de référence", entry_options, key=f"{prefix}_source")
+        source = entry_map[source_label]
 
-        source_label = st.selectbox(
-            "Fiche de paie utilisée comme base",
-            entry_options,
-            index=min(occ_index - 1, len(entry_options) - 1),
-            key=f"{prefix}_source",
-            on_change=_clear_occ_fields,
-            args=(prefix,),
-        )
-        source_entry = entry_map[source_label]
-        index_value = source_entry.pdf_index
-
-        if index_value is not None:
-            st.info(
-                "Index repris automatiquement sur cette fiche : "
-                f"**{index_value:.4f}**".replace(".", ",")
-            )
-        else:
-            st.warning("Aucun index n'a été détecté sur la fiche sélectionnée.")
-
-        default_status_index = _status_default_index(source_entry.status)
-        col_a, col_b = st.columns(2)
-
-        with col_a:
-            fonction_code = st.selectbox(
-                "Fonction",
-                options=[""] + [code for code, _ in FONCTIONS_ENSEIGNEMENT],
-                format_func=_format_fonction_option,
-                index=0,
-                key=f"{prefix}_fonction",
-            )
-            fonction = FONCTIONS_PAR_CODE.get(fonction_code, "")
-
-            status_index = st.selectbox(
-                "Statut à reporter",
-                options=list(range(4)),
-                format_func=_status_value,
-                index=default_status_index,
+        c1, c2 = st.columns(2)
+        with c1:
+            function_options = ["— Sélectionner une fonction —"] + [_format_fonction_option(code) for code, _ in FONCTIONS_ENSEIGNEMENT]
+            function_option = st.selectbox("Fonction", function_options, key=f"{prefix}_fonction")
+            fonction = function_option.split(" — ", 1)[1] if " — " in function_option else ""
+            status_index = _status_default_index(source.status)
+            statut = st.selectbox(
+                "Statut",
+                ["Temporaire", "Définitif / statutaire", "Convention premier emploi", "Autre"],
+                index=status_index,
                 key=f"{prefix}_statut",
             )
-            statut = _status_value(status_index)
+        with c2:
+            start_txt = _masked_date_input("Date de début", key=f"{prefix}_start")
+            end_txt = _masked_date_input("Date de fin", key=f"{prefix}_end")
 
-            start_text = _masked_date_input(
-                "Date d'entrée dans cette occupation",
-                key=f"{prefix}_start",
-            )
-            end_text = _masked_date_input(
-                "Date de fin effective de cette occupation",
-                key=f"{prefix}_end",
-            )
-
-        with col_b:
-            q = st.number_input(
-                "Q — prestations hebdomadaires",
-                min_value=0.0,
-                value=float(source_entry.q or 0.0),
-                step=0.01,
-                format="%.2f",
-                key=f"{prefix}_q",
-            )
-            s = st.number_input(
-                "S — charge complète",
-                min_value=0.0,
-                value=float(source_entry.s or 0.0),
-                step=0.01,
-                format="%.2f",
-                key=f"{prefix}_s",
-            )
-            tab = st.number_input(
-                "Traitement annuel brut (TAB) à 100 %",
-                min_value=0.0,
-                value=float(source_entry.annual_base_salary or 0.0),
-                step=0.01,
-                format="%.2f",
-                key=f"{prefix}_tab",
-            )
-
-            suggested_fr = reconstruct_monthly_fr(source_entry)
-            monthly_fr = st.number_input(
-                "Allocation F/R mensuelle à inclure",
-                min_value=0.0,
-                value=float(suggested_fr),
-                step=0.01,
-                format="%.2f",
-                key=f"{prefix}_fr_month",
-                help=(
-                    "Si la fiche ne couvre qu'une partie d'un mois et qu'une allocation F/R a été repérée, "
-                    "le module reconstitue le montant d'un mois complet par règle de trois."
-                ),
-            )
-            if not source_entry.fr_found:
-                st.caption("Aucune allocation F/R n'a été repérée automatiquement sur cette fiche.")
-
-        start_date, start_error = _parse_user_date(start_text)
-        end_date, end_error = _parse_user_date(end_text)
-
-        if start_error:
-            global_errors.append(f"Occupation {occ_index} — date d'entrée : {start_error}")
-        if end_error:
-            global_errors.append(f"Occupation {occ_index} — date de fin : {end_error}")
+        start_date, start_err = _parse_user_date(start_txt)
+        end_date, end_err = _parse_user_date(end_txt)
+        if start_err:
+            global_errors.append(f"Occupation {i} — date de début manquante ou invalide.")
+        if end_err:
+            global_errors.append(f"Occupation {i} — date de fin manquante ou invalide.")
         if start_date and end_date and end_date < start_date:
-            global_errors.append(f"Occupation {occ_index} — la date de fin est antérieure à la date d'entrée.")
+            global_errors.append(f"Occupation {i} — date de fin antérieure à la date de début.")
         if not fonction:
-            global_errors.append(f"Occupation {occ_index} — sélectionnez une fonction.")
+            global_errors.append(f"Occupation {i} — fonction non sélectionnée.")
 
-        salary_monthly: Optional[float] = None
-        if index_value is None:
-            global_errors.append(f"Occupation {occ_index} — index absent de la fiche de paie sélectionnée.")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            q = st.number_input("Q", min_value=0.0, value=float(source.q or 0.0), step=0.01, key=f"{prefix}_q")
+        with c2:
+            s = st.number_input("S", min_value=0.0, value=float(source.s or 0.0), step=0.01, key=f"{prefix}_s")
+        with c3:
+            mode_payment = st.selectbox("Mode de paiement", ["10", "12", "20"], key=f"{prefix}_mode_payment")
+
+        tab = st.number_input("TAB annuel à 100 %", min_value=0.0, value=float(source.annual_base_salary or 0.0), step=0.01, key=f"{prefix}_tab")
+        index_value = float(source.pdf_index or 0.0)
+        monthly_fr = reconstruct_monthly_fr(source)
+        salary_monthly = calculate_monthly_indexed_salary(tab, q, s, index_value, monthly_fr) if tab > 0 and q > 0 and s > 0 and index_value > 0 else None
+
+        if salary_monthly is not None:
+            st.success(f"Salaire mensuel brut indexé : **{_format_money(salary_monthly)}**")
         else:
-            salary_monthly = calculate_monthly_indexed_salary(
-                annual_base_salary=tab,
-                q=q,
-                s=s,
-                index_value=index_value,
-                monthly_fr=monthly_fr,
-            )
+            global_errors.append(f"Occupation {i} — salaire mensuel impossible à calculer (TAB, Q/S ou index manquant).")
 
-        if salary_monthly is None:
-            global_errors.append(f"Occupation {occ_index} — impossible de calculer le salaire mensuel brut indexé.")
-        else:
-            st.success(f"Salaire mensuel brut indexé à reporter : **{_format_money(salary_monthly)}**")
-            st.caption(
-                f"Calcul : ({_format_money(tab)} × {q:g}/{s:g} × "
-                f"{index_value:.4f}) / 12 + {_format_money(monthly_fr)} F/R"
-            )
-
-        # MODE DE PAIEMENT
-        period_additional = False
-        if "Temporaire" in statut:
-            period_additional = st.checkbox(
-                "Il s'agit de périodes additionnelles",
-                value=False,
-                key=f"{prefix}_period_additional",
-                help="Les périodes additionnelles sont en mode 12.",
-            )
-        auto_mode = "20" if ("Temporaire" in statut and not period_additional) else "12"
-        mode_choice = st.selectbox(
-            "Mode de paiement",
-            [f"Automatique — {auto_mode}", "12", "20"],
-            key=f"{prefix}_mode_override",
+        onss_text = st.selectbox(
+            "Cotisations ONSS",
+            [
+                "ont été prélevées",
+                "ont été prélevées du ... au ...",
+                "n'ont pas été prélevées",
+                "seront versées",
+            ],
+            key=f"{prefix}_onss",
         )
-        mode_payment = auto_mode if mode_choice.startswith("Automatique") else mode_choice
 
-        # ----------------------------------------------------
-        # COTISATIONS ONSS — SECTEUR CHÔMAGE
-        # ----------------------------------------------------
-        # La case à cocher dépend d'abord du statut.
-        # - temporaire / convention premier emploi : cotisations normalement prélevées ;
-        # - définitif / statutaire : cotisations normalement non prélevées ;
-        # - « seront versées » uniquement dans le cas particulier de l'art. 9.
-        # La case « ont été prélevées du ... au ... » n'est utilisée que lorsqu'il
-        # faut réellement déclarer une période particulière de prélèvement.
-        onss_period_start: Optional[date] = None
-        onss_period_end: Optional[date] = None
-
-        if statut in ("Temporaire", "Convention premier emploi"):
-            onss_case = st.selectbox(
-                "Cotisations ONSS — secteur chômage",
-                [
-                    "Ont été prélevées",
-                    "Ont été prélevées uniquement pendant une période déterminée",
-                ],
-                key=f"{prefix}_onss_case",
-            )
-
-            if onss_case == "Ont été prélevées":
-                onss_text = "ont été prélevées"
-            else:
-                st.caption(
-                    "N'utilisez cette option que si les cotisations chômage ont réellement été "
-                    "prélevées pendant une période plus limitée que l'occupation."
-                )
-                oc1, oc2 = st.columns(2)
-                with oc1:
-                    onss_start_text = _masked_date_input(
-                        "Cotisations ONSS prélevées — du",
-                        key=f"{prefix}_onss_period_start",
-                    )
-                with oc2:
-                    onss_end_text = _masked_date_input(
-                        "Cotisations ONSS prélevées — au",
-                        key=f"{prefix}_onss_period_end",
-                    )
-
-                onss_period_start, onss_start_error = _parse_user_date(onss_start_text)
-                onss_period_end, onss_end_error = _parse_user_date(onss_end_text)
-
-                if onss_start_error:
-                    global_errors.append(
-                        f"Occupation {occ_index} — date de début de la période de prélèvement ONSS : "
-                        f"{onss_start_error}"
-                    )
-                if onss_end_error:
-                    global_errors.append(
-                        f"Occupation {occ_index} — date de fin de la période de prélèvement ONSS : "
-                        f"{onss_end_error}"
-                    )
-                if (
-                    onss_period_start
-                    and onss_period_end
-                    and onss_period_end < onss_period_start
-                ):
-                    global_errors.append(
-                        f"Occupation {occ_index} — la fin de la période de prélèvement ONSS "
-                        "est antérieure à son début."
-                    )
-
-                if onss_period_start and onss_period_end:
-                    onss_text = (
-                        f"ont été prélevées du {_format_date(onss_period_start)} "
-                        f"au {_format_date(onss_period_end)}"
-                    )
-                else:
-                    onss_text = "ont été prélevées du — au —"
-
-        elif statut == "Définitif / statutaire":
-            onss_case = st.selectbox(
-                "Cotisations ONSS — secteur chômage",
-                [
-                    "N'ont pas été prélevées (enseignant statutaire)",
-                    "Seront versées — conditions de l'article 9 de la loi du 20/07/1991",
-                ],
-                key=f"{prefix}_onss_case",
-            )
-            if onss_case.startswith("Seront versées"):
-                onss_text = "seront versées"
-                st.warning(
-                    "Sélectionnez « seront versées » uniquement si les conditions de l'article 9 "
-                    "de la loi du 20 juillet 1991 sont remplies."
-                )
-            else:
-                onss_text = "n'ont pas été prélevées (enseignant statutaire)"
-
-        else:
-            # Pour un statut « Autre », aucune déduction automatique n'est suffisamment sûre.
-            onss_case = st.selectbox(
-                "Cotisations ONSS — secteur chômage",
-                [
-                    "Ont été prélevées",
-                    "Ont été prélevées uniquement pendant une période déterminée",
-                    "N'ont pas été prélevées (enseignant statutaire)",
-                    "Seront versées — conditions de l'article 9 de la loi du 20/07/1991",
-                ],
-                key=f"{prefix}_onss_case",
-            )
-
-            if onss_case == "Ont été prélevées":
-                onss_text = "ont été prélevées"
-            elif onss_case.startswith("N'ont pas été prélevées"):
-                onss_text = "n'ont pas été prélevées (enseignant statutaire)"
-            elif onss_case.startswith("Seront versées"):
-                onss_text = "seront versées"
-                st.warning(
-                    "Sélectionnez « seront versées » uniquement si les conditions de l'article 9 "
-                    "de la loi du 20 juillet 1991 sont remplies."
-                )
-            else:
-                oc1, oc2 = st.columns(2)
-                with oc1:
-                    onss_start_text = _masked_date_input(
-                        "Cotisations ONSS prélevées — du",
-                        key=f"{prefix}_onss_period_start",
-                    )
-                with oc2:
-                    onss_end_text = _masked_date_input(
-                        "Cotisations ONSS prélevées — au",
-                        key=f"{prefix}_onss_period_end",
-                    )
-                onss_period_start, onss_start_error = _parse_user_date(onss_start_text)
-                onss_period_end, onss_end_error = _parse_user_date(onss_end_text)
-                if onss_start_error:
-                    global_errors.append(
-                        f"Occupation {occ_index} — date de début de la période de prélèvement ONSS : "
-                        f"{onss_start_error}"
-                    )
-                if onss_end_error:
-                    global_errors.append(
-                        f"Occupation {occ_index} — date de fin de la période de prélèvement ONSS : "
-                        f"{onss_end_error}"
-                    )
-                if (
-                    onss_period_start
-                    and onss_period_end
-                    and onss_period_end < onss_period_start
-                ):
-                    global_errors.append(
-                        f"Occupation {occ_index} — la fin de la période de prélèvement ONSS "
-                        "est antérieure à son début."
-                    )
-                if onss_period_start and onss_period_end:
-                    onss_text = (
-                        f"ont été prélevées du {_format_date(onss_period_start)} "
-                        f"au {_format_date(onss_period_end)}"
-                    )
-                else:
-                    onss_text = "ont été prélevées du — au —"
-
-        # ----------------------------------------------------
-        # SALAIRE BRUT EXACT - AUTOMATIQUE PAR REGLE DE TROIS
-        # ----------------------------------------------------
-        exact_total: Optional[float] = None
+        exact_total = None
         quarter_label = ""
-        dmfa_state = ""
-
+        dmfa_state = "Oui / déjà déclarée et acceptée"
         if end_date:
             _, _, _, quarter_label = quarter_info(end_date)
             dmfa_state = st.radio(
-                f"Le trimestre ONSS {quarter_label} est-il déjà déclaré et accepté en DmfA ?",
-                [
-                    "Oui / ne pas compléter le salaire brut exact",
-                    "Non / le salaire brut exact doit être complété",
-                    "Je ne sais pas",
-                ],
-                index=2,
+                f"Occupation {i} — DmfA du trimestre {quarter_label} déjà déclarée/acceptée ?",
+                ["Oui / déjà déclarée et acceptée", "Non / le salaire brut exact doit être complété"],
+                horizontal=True,
                 key=f"{prefix}_dmfa_state",
-                help=(
-                    "Le salaire brut exact ne doit être inscrit que pour un trimestre ONSS "
-                    "qui n'est pas encore déclaré ou dont la déclaration n'est pas encore acceptée."
-                ),
             )
-
-            if dmfa_state == "Non / le salaire brut exact doit être complété":
-                if salary_monthly is None or salary_monthly <= 0:
-                    global_errors.append(
-                        f"Occupation {occ_index} — impossible de calculer le salaire brut exact : salaire mensuel indisponible."
-                    )
-                elif not start_date:
-                    global_errors.append(
-                        f"Occupation {occ_index} — impossible de calculer le salaire brut exact : date de début manquante."
-                    )
-                else:
-                    exact_total = _show_exact_gross_calculation(
-                        salary_monthly,
-                        start_date,
-                        end_date,
-                        quarter_label,
-                    )
-                    if exact_total is None or exact_total <= 0:
-                        global_errors.append(
-                            f"Occupation {occ_index} — le salaire brut exact du trimestre n'a pas pu être calculé."
-                        )
-
-            elif dmfa_state == "Oui / ne pas compléter le salaire brut exact":
-                st.caption(
-                    "Le trimestre est déclaré et accepté : le champ « Salaire brut exact » "
-                    "restera vide sur le C4."
-                )
-
-            elif dmfa_state == "Je ne sais pas":
-                st.warning(
-                    f"Vérifiez si le trimestre {quarter_label} est déjà déclaré et accepté en DmfA. "
-                    "En attendant, le champ « Salaire brut exact » restera vide sur le C4."
-                )
+            if dmfa_state == "Non / le salaire brut exact doit être complété" and start_date and salary_monthly:
+                exact_total = _show_exact_gross_calculation(salary_monthly, start_date, end_date, quarter_label)
 
         occupation_results.append(
             {
@@ -3003,14 +2522,9 @@ def render_c4_assistant():
                 "end_date": end_date,
                 "q": q,
                 "s": s,
-                "tab": tab,
-                "monthly_fr": monthly_fr,
-                "index_value": index_value,
                 "salary_monthly": salary_monthly,
                 "mode_payment": mode_payment,
                 "onss_text": onss_text,
-                "onss_period_start": onss_period_start,
-                "onss_period_end": onss_period_end,
                 "quarter_label": quarter_label,
                 "dmfa_state": dmfa_state,
                 "exact_total": exact_total,
@@ -3018,172 +2532,54 @@ def render_c4_assistant():
         )
         st.divider()
 
-    # --------------------------------------------------------
-    # 5. INTERRUPTIONS
-    # --------------------------------------------------------
-    st.subheader("5. Interruptions à mentionner")
-    valid_end_dates = [o["end_date"] for o in occupation_results if o["end_date"] is not None]
+    valid_end_dates = [o["end_date"] for o in occupation_results if o["end_date"]]
     final_end_date = max(valid_end_dates) if valid_end_dates else None
+
+    st.subheader("5. Interruptions à mentionner")
     interruption_rows: list[dict] = []
+    interruption_count = int(st.number_input("Nombre d'interruptions à mentionner", min_value=0, max_value=2, value=0, step=1, key="c4_interruption_count"))
+    for i in range(1, interruption_count + 1):
+        st.markdown(f"**Interruption {i}**")
+        kind = st.selectbox("Type", ["Protection de la maternité", "Autre interruption"], key=f"c4_int_{i}_kind")
+        c1, c2 = st.columns(2)
+        with c1:
+            a = _masked_date_input("Du", key=f"c4_int_{i}_start")
+        with c2:
+            b = _masked_date_input("Au", key=f"c4_int_{i}_end")
+        da, _ = _parse_user_date(a)
+        db, _ = _parse_user_date(b)
+        nature = ""
+        if kind == "Autre interruption":
+            nature = st.text_input("Nature", key=f"c4_int_{i}_nature")
+        interruption_rows.append({"kind": kind, "start": da, "end": db, "nature": nature})
 
-    if final_end_date:
-        window_start, window_end = interruption_window(final_end_date)
-        st.caption(
-            "Période à contrôler pour les interruptions : "
-            f"{_format_date(window_start)} au {_format_date(window_end)}."
-        )
-        interruption_count = int(
-            st.number_input(
-                "Nombre d'interruptions à mentionner",
-                min_value=0,
-                max_value=3,
-                value=0,
-                step=1,
-                key="c4_interruption_count",
-            )
-        )
-
-        for i in range(1, interruption_count + 1):
-            st.markdown(f"**Interruption {i}**")
-            kind = st.selectbox(
-                "Nature",
-                [
-                    "Protection de la maternité",
-                    "Maladie / accident non couvert par un salaire garanti",
-                    "Congé sans solde / absence non rémunérée après le 10e jour",
-                    "Interruption de carrière à temps plein",
-                    "Interruption de carrière à temps partiel",
-                    "Autre événement à mentionner",
-                ],
-                key=f"c4_interrupt_{i}_kind",
-            )
-            c1, c2 = st.columns(2)
-            with c1:
-                start_i_text = _masked_date_input("Du", key=f"c4_interrupt_{i}_start")
-            with c2:
-                end_i_text = _masked_date_input("Au", key=f"c4_interrupt_{i}_end")
-
-            start_i, error_start_i = _parse_user_date(start_i_text)
-            end_i, error_end_i = _parse_user_date(end_i_text)
-            if error_start_i:
-                global_errors.append(f"Interruption {i} — date de début : {error_start_i}")
-            if error_end_i:
-                global_errors.append(f"Interruption {i} — date de fin : {error_end_i}")
-
-            nature = kind
-            if kind == "Autre événement à mentionner":
-                nature = st.text_input("Précisez la nature", key=f"c4_interrupt_{i}_nature")
-
-            if start_i and end_i:
-                if end_i < start_i:
-                    global_errors.append(f"Interruption {i} — la date de fin est antérieure à la date de début.")
-                if start_i < window_start or end_i > window_end:
-                    st.warning(f"L'interruption {i} dépasse la période à contrôler.")
-
-            interruption_rows.append(
-                {"kind": kind, "nature": nature, "start": start_i, "end": end_i}
-            )
-    else:
-        st.warning("Indiquez d'abord la date de fin de l'occupation.")
-
-    # --------------------------------------------------------
-    # 6. FIN DE LA DERNIERE OCCUPATION
-    # --------------------------------------------------------
-    st.subheader("6. Fin de la dernière occupation")
+    st.subheader("6. Fin de l'occupation et déclaration")
     end_reason = st.selectbox(
-        "Comment la dernière occupation a-t-elle pris fin ?",
+        "Façon dont l'occupation a pris fin",
         [
             "Fin de plein droit et sans préavis",
             "Le pouvoir organisateur a mis fin à l'occupation avec préavis",
             "Le pouvoir organisateur a mis fin à l'occupation sans préavis",
             "Le membre du personnel a quitté volontairement son emploi",
-            "Autre / à compléter manuellement",
         ],
         key="c4_end_reason",
     )
-
-    auto_motif = _default_unemployment_reason(end_reason)
-    previous_end_reason = st.session_state.get("c4_previous_end_reason")
-    current_motif = st.session_state.get("c4_motif_chomage", "")
-    if previous_end_reason != end_reason:
-        previous_auto = _default_unemployment_reason(previous_end_reason or "")
-        if not current_motif.strip() or current_motif.strip() == previous_auto:
-            st.session_state["c4_motif_chomage"] = auto_motif
-        st.session_state["c4_previous_end_reason"] = end_reason
-
-    motif_chomage = st.text_area(
+    motif_chomage_pdf = st.text_area(
         "Motif du chômage",
+        value=_default_unemployment_reason(end_reason),
         key="c4_motif_chomage",
-        height=80,
-        help="Le motif est proposé automatiquement et reste modifiable.",
-    )
-    motif_chomage_pdf = motif_chomage.strip() or auto_motif
-
-    # --------------------------------------------------------
-    # 7. CONTROLES
-    # --------------------------------------------------------
-    st.subheader("7. Contrôles")
-    if not employee_name.strip():
-        global_errors.append("Nom et prénom manquants.")
-    if not niss.strip():
-        global_errors.append("NISS manquant.")
-    if not fase:
-        global_errors.append("Numéro FASE de l'établissement manquant.")
-    elif not fase_record:
-        global_errors.append(f"Numéro FASE {fase} introuvable dans le fichier signalétique FWB.")
-    if not establishment_name.strip():
-        global_errors.append("Nom officiel de l'établissement introuvable à partir du FASE.")
-    if not establishment_address.strip():
-        global_errors.append("Adresse officielle de l'établissement introuvable à partir du FASE.")
-
-    for i, occ in enumerate(occupation_results, start=1):
-        if not occ["fonction"].strip():
-            global_errors.append(f"Occupation {i} — fonction manquante.")
-        if occ["q"] <= 0 or occ["s"] <= 0:
-            global_errors.append(f"Occupation {i} — Q/S invalide.")
-        if occ["tab"] <= 0:
-            global_errors.append(f"Occupation {i} — TAB nul ou manquant.")
-
-    global_errors = list(dict.fromkeys(global_errors))
-    if global_errors:
-        for error in global_errors:
-            st.warning(error)
-    else:
-        st.success("Les contrôles de base sont satisfaits.")
-
-    # --------------------------------------------------------
-    # 8. C4-ENSEIGNEMENT PRET A IMPRIMER
-    # --------------------------------------------------------
-    st.subheader("8. C4-Enseignement prêt à imprimer")
-    responsible_name = st.text_input(
-        "Nom du responsable / délégué qui signera le C4",
-        key="c4_responsible_name",
-    )
-    declaration_date = st.date_input(
-        "Date de la déclaration",
-        value=date.today(),
-        format="DD/MM/YYYY",
-        key="c4_declaration_date",
     )
 
-    rupture_indemnity = st.checkbox(
-        "Une indemnité de rupture a été payée",
-        value=False,
-        key="c4_rupture_indemnity",
-    )
+    rupture_indemnity = st.checkbox("Une indemnité de rupture a été payée", key="c4_rupture_indemnity")
     rupture_start = rupture_end = None
     if rupture_indemnity:
-        rc1, rc2 = st.columns(2)
-        with rc1:
+        c1, c2 = st.columns(2)
+        with c1:
             rs = _masked_date_input("Indemnité de rupture - du", key="c4_rupture_start")
-        with rc2:
+        with c2:
             re_ = _masked_date_input("Indemnité de rupture - au", key="c4_rupture_end")
-        rupture_start, err = _parse_user_date(rs)
-        if err:
-            global_errors.append("Date de début de l'indemnité de rupture invalide.")
-        rupture_end, err = _parse_user_date(re_)
-        if err:
-            global_errors.append("Date de fin de l'indemnité de rupture invalide.")
+        rupture_start, _ = _parse_user_date(rs)
+        rupture_end, _ = _parse_user_date(re_)
 
     notice_method = "Lettre recommandée"
     notice_start = notice_end = notice_extended_until = None
@@ -3193,54 +2589,46 @@ def render_c4_assistant():
     transition_start = transition_end = None
 
     if end_reason == "Le pouvoir organisateur a mis fin à l'occupation avec préavis":
-        notice_method = st.radio(
-            "Notification du préavis",
-            ["Lettre recommandée", "Exploit d'huissier"],
-            horizontal=True,
-            key="c4_notice_method",
-        )
-        nc1, nc2 = st.columns(2)
-        with nc1:
+        notice_method = st.radio("Notification du préavis", ["Lettre recommandée", "Exploit d'huissier"], horizontal=True, key="c4_notice_method")
+        c1, c2 = st.columns(2)
+        with c1:
             ns = _masked_date_input("Préavis - du", key="c4_notice_start")
-        with nc2:
+        with c2:
             ne = _masked_date_input("Préavis - au", key="c4_notice_end")
-        notice_start, err = _parse_user_date(ns)
-        if err:
-            global_errors.append("Date de début du préavis invalide.")
-        notice_end, err = _parse_user_date(ne)
-        if err:
-            global_errors.append("Date de fin du préavis invalide.")
+        notice_start, _ = _parse_user_date(ns)
+        notice_end, _ = _parse_user_date(ne)
 
         notice_suspended = st.checkbox("Le délai de préavis a été suspendu", key="c4_notice_suspended")
         if notice_suspended:
-            notice_suspension_reason = st.selectbox(
-                "Cause de suspension",
-                ["Maladie", "Vacances", "Autre"],
-                key="c4_notice_susp_reason",
-            )
+            notice_suspension_reason = st.selectbox("Cause de suspension", ["Maladie", "Vacances", "Autre"], key="c4_notice_susp_reason")
             if notice_suspension_reason == "Autre":
                 notice_suspension_reason = st.text_input("Autre cause", key="c4_notice_susp_other")
             nx = _masked_date_input("Préavis prolongé jusqu'au", key="c4_notice_extended")
-            notice_extended_until, err = _parse_user_date(nx)
-            if err:
-                global_errors.append("Date de prolongation du préavis invalide.")
+            notice_extended_until, _ = _parse_user_date(nx)
 
         transition = st.checkbox("Trajet de transition pendant le préavis", key="c4_transition")
         if transition:
-            tc1, tc2 = st.columns(2)
-            with tc1:
+            c1, c2 = st.columns(2)
+            with c1:
                 ts = _masked_date_input("Trajet de transition - du", key="c4_transition_start")
-            with tc2:
+            with c2:
                 te = _masked_date_input("Trajet de transition - au", key="c4_transition_end")
-            transition_start, err = _parse_user_date(ts)
-            if err:
-                global_errors.append("Date de début du trajet de transition invalide.")
-            transition_end, err = _parse_user_date(te)
-            if err:
-                global_errors.append("Date de fin du trajet de transition invalide.")
+            transition_start, _ = _parse_user_date(ts)
+            transition_end, _ = _parse_user_date(te)
 
+    responsible_name = st.text_input("Nom du responsable / délégué qui signera le C4", key="c4_responsible")
+    declaration_date = st.date_input("Date de la déclaration", value=date.today(), format="DD/MM/YYYY", key="c4_decl_date")
+
+    if not employee_name.strip():
+        global_errors.append("Nom du membre du personnel manquant.")
+    if len(re.sub(r"\D", "", niss)) != 11:
+        global_errors.append("Le NISS doit contenir 11 chiffres.")
+    if not fase_record:
+        global_errors.append("Établissement FASE non identifié.")
     if not responsible_name.strip():
         global_errors.append("Nom du responsable / délégué manquant pour le PDF.")
+    if not final_end_date:
+        global_errors.append("Aucune date de fin d'occupation valide.")
 
     template_pdf, template_error = _template_bytes(TEMPLATE_C4_ENSEIGNEMENT)
     if template_error:
@@ -3254,8 +2642,10 @@ def render_c4_assistant():
         return
 
     global_errors = list(dict.fromkeys(global_errors))
+    for error in global_errors:
+        st.warning(error)
     if global_errors:
-        st.warning("Le PDF prêt à imprimer est bloqué tant que les avertissements ci-dessus ne sont pas corrigés.")
+        st.info("Corrigez les éléments ci-dessus avant de générer le C4-Enseignement.")
         return
 
     pdf_data = {
@@ -3294,7 +2684,7 @@ def render_c4_assistant():
         return
 
     st.success(
-        "Le C4-Enseignement est prêt à imprimer. La rubrique II destinée à l'enseignant reste volontairement vierge. "
+        "Le C4-Enseignement est prêt à imprimer. La rubrique II destinée à l'enseignant reste vierge. "
         "La signature de l'employeur doit être apposée après impression."
     )
     st.download_button(
